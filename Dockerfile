@@ -14,5 +14,6 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY prisma ./prisma
+COPY firebase-admin.json ./firebase-admin.json
 EXPOSE 4000
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

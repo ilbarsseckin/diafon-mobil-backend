@@ -93,4 +93,13 @@ export class AuthService {
       },
     };
   }
+
+  // FCM push token kaydet
+  async saveFcmToken(userId: string, fcmToken: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmToken },
+    });
+    return { message: 'Token kaydedildi' };
+  }
 }

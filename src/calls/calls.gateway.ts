@@ -5,6 +5,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { PresenceService } from './presence.service';
+import { PushService } from './push.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Logger } from '@nestjs/common';
 
@@ -17,6 +18,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private jwt: JwtService,
     private presence: PresenceService,
     private prisma: PrismaService,
+    private push: PushService,
   ) {}
 
   // --- Baglanti: token dogrula, online isaretle ---
@@ -71,6 +73,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!receiverSocketId) {
       // Karsi taraf offline -> kacirildi
       await this.prisma.call.update({ where: { id: call.id }, data: { status: 'MISSED' } });
+      const callerOffline = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } });
+      await this.push.sendIncomingCall(data.receiverUserId, callerOffline?.name || 'Birisi', call.id);
       client.emit('call:unavailable', { callId: call.id, message: 'Kullanıcı şu an çevrimdışı' });
       return;
     }
@@ -86,6 +90,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       caller,
     });
     client.emit('call:ringing', { callId: call.id });
+    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id);
     this.logger.log(`Cagri: ${callerUserId} -> ${data.receiverUserId} (call=${call.id})`);
   }
 

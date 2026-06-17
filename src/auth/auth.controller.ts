@@ -1,6 +1,7 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, VerifyOtpDto, LoginDto } from './dto/auth.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -19,5 +20,12 @@ export class AuthController {
   @Post('verify')
   verify(@Body() dto: VerifyOtpDto) {
     return this.authService.verify(dto);
+  }
+
+  // FCM push token kaydet (giriş yapmış kullanıcı)
+  @UseGuards(JwtAuthGuard)
+  @Post('fcm-token')
+  saveFcmToken(@Req() req: any, @Body() body: { fcmToken: string }) {
+    return this.authService.saveFcmToken(req.user.userId, body.fcmToken);
   }
 }
