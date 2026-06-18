@@ -55,7 +55,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:start')
   async onCallStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { receiverUserId: string; buildingId?: string },
+    @MessageBody() data: { receiverUserId: string; buildingId?: string; callerPhotoUrl?: string },
   ) {
     const callerUserId = client.data.userId;
     const receiverSocketId = await this.presence.getSocketId(data.receiverUserId);
@@ -67,13 +67,14 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         receiverUserId: data.receiverUserId,
         buildingId: data.buildingId,
         status: 'RINGING',
+        callerPhotoUrl: data.callerPhotoUrl,
       },
     });
 
     if (!receiverSocketId) {
       // Karsi taraf offline -> push gonder, arayani beklet (kesme)
       const callerOff = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } });
-      await this.push.sendIncomingCall(data.receiverUserId, callerOff?.name || 'Birisi', call.id, callerUserId);
+      await this.push.sendIncomingCall(data.receiverUserId, callerOff?.name || 'Birisi', call.id, callerUserId, data.callerPhotoUrl);
       client.emit('call:ringing', { callId: call.id });
       return;
     }
@@ -87,9 +88,10 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(receiverSocketId).emit('call:incoming', {
       callId: call.id,
       caller,
+      callerPhoto: data.callerPhotoUrl || '',
     });
     client.emit('call:ringing', { callId: call.id });
-    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id, callerUserId);
+    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id, callerUserId, data.callerPhotoUrl);
     this.logger.log(`Cagri: ${callerUserId} -> ${data.receiverUserId} (call=${call.id})`);
   }
 

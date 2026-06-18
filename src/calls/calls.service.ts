@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class CallsService {
@@ -34,5 +36,37 @@ export class CallsService {
         duration: c.duration,
       };
     });
+  }
+
+  // Misafir fotosu kaydet (base64), URL dondur
+  async savePhoto(base64Data: string): Promise<string> {
+    const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    // base64 prefix temizle (data:image/jpeg;base64,...)
+    const clean = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(clean, 'base64');
+    const filename = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    return `/uploads/${filename}`;
+  }
+
+  // 30 gunden eski fotolari temizle (disk dolmasin)
+  async cleanOldPhotos() {
+    const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) return;
+    const files = fs.readdirSync(uploadsDir);
+    const now = Date.now();
+    const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 gun
+    for (const file of files) {
+      const filePath = path.join(uploadsDir, file);
+      try {
+        const stat = fs.statSync(filePath);
+        if (now - stat.mtimeMs > maxAge) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (e) {}
+    }
   }
 }

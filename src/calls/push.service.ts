@@ -27,7 +27,7 @@ export class PushService {
   }
 
   // Gelen çağrı bildirimi - DATA mesajı (arka planda CallKit tetikler)
-  async sendIncomingCall(receiverUserId: string, callerName: string, callId: string, callerUserId: string) {
+  async sendIncomingCall(receiverUserId: string, callerName: string, callId: string, callerUserId: string, callerPhotoUrl?: string) {
     if (!this.initialized) return;
 
     const user = await this.prisma.user.findUnique({
@@ -49,6 +49,7 @@ export class PushService {
           callId: callId,
           callerName: callerName,
           callerUserId: callerUserId,
+          callerPhoto: callerPhotoUrl || '',
         },
         android: {
           priority: 'high',

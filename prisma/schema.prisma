@@ -93,6 +93,7 @@ model Call {
   startedAt      DateTime   @default(now()) @map("started_at")
   endedAt        DateTime?  @map("ended_at")
   duration       Int?       // saniye
+  callerPhotoUrl String?    @map("caller_photo_url")
   status         CallStatus @default(RINGING)
 
   caller         User       @relation("CallsMade", fields: [callerUserId], references: [id])
