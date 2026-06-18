@@ -71,11 +71,10 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     if (!receiverSocketId) {
-      // Karsi taraf offline -> kacirildi
-      await this.prisma.call.update({ where: { id: call.id }, data: { status: 'MISSED' } });
-      const callerOffline = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } });
-      await this.push.sendIncomingCall(data.receiverUserId, callerOffline?.name || 'Birisi', call.id);
-      client.emit('call:unavailable', { callId: call.id, message: 'Kullanıcı şu an çevrimdışı' });
+      // Karsi taraf offline -> push gonder, arayani beklet (kesme)
+      const callerOff = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } });
+      await this.push.sendIncomingCall(data.receiverUserId, callerOff?.name || 'Birisi', call.id, callerUserId);
+      client.emit('call:ringing', { callId: call.id });
       return;
     }
 
@@ -90,7 +89,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       caller,
     });
     client.emit('call:ringing', { callId: call.id });
-    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id);
+    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id, callerUserId);
     this.logger.log(`Cagri: ${callerUserId} -> ${data.receiverUserId} (call=${call.id})`);
   }
 

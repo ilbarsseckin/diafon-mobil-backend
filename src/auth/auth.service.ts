@@ -96,10 +96,12 @@ export class AuthService {
 
   // FCM push token kaydet
   async saveFcmToken(userId: string, fcmToken: string) {
-    await this.prisma.user.update({
+    console.log('SAVE FCM TOKEN cagrildi: userId=' + userId + ' tokenLen=' + (fcmToken ? fcmToken.length : 'NULL'));
+    const r = await this.prisma.user.update({
       where: { id: userId },
       data: { fcmToken },
     });
+    console.log('SAVE FCM TOKEN basarili: ' + r.name);
     return { message: 'Token kaydedildi' };
   }
 }

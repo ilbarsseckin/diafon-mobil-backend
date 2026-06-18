@@ -26,8 +26,8 @@ export class PushService {
     }
   }
 
-  // Gelen çağrı bildirimi gönder
-  async sendIncomingCall(receiverUserId: string, callerName: string, callId: string) {
+  // Gelen çağrı bildirimi - DATA mesajı (arka planda CallKit tetikler)
+  async sendIncomingCall(receiverUserId: string, callerName: string, callId: string, callerUserId: string) {
     if (!this.initialized) return;
 
     const user = await this.prisma.user.findUnique({
@@ -43,25 +43,18 @@ export class PushService {
     try {
       await admin.messaging().send({
         token: user.fcmToken,
-        notification: {
-          title: 'Gelen Çağrı',
-          body: `${callerName} sizi arıyor`,
-        },
+        // Sadece data - notification YOK (arka planda handler çalışsın diye)
         data: {
           type: 'incoming_call',
           callId: callId,
           callerName: callerName,
+          callerUserId: callerUserId,
         },
         android: {
           priority: 'high',
-          notification: {
-            channelId: 'calls',
-            priority: 'high',
-            sound: 'default',
-          },
         },
       });
-      this.logger.log(`Push gonderildi: ${receiverUserId}`);
+      this.logger.log(`Push (data) gonderildi: ${receiverUserId}`);
     } catch (e) {
       this.logger.error('Push gonderilemedi: ' + e.message);
     }
