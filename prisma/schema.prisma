@@ -49,6 +49,7 @@ model Building {
   latitude     Float
   longitude    Float
   radiusMeter  Int      @default(30) @map("radius_meter")
+  qrToken      String?  @unique @map("qr_token")
   createdAt    DateTime @default(now()) @map("created_at")
 
   apartments   Apartment[]

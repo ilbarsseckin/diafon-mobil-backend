@@ -21,6 +21,15 @@ export class BuildingsController {
     return this.service.findByLocation(latNum, lngNum);
   }
 
+  // --- Herkese acik: QR token ile bina + sakin listesi ---
+  @Get('by-qr')
+  byQr(@Query('token') token: string) {
+    if (!token) {
+      throw new BadRequestException('QR token gerekli');
+    }
+    return this.service.findByQrToken(token);
+  }
+
   // --- Sakin: evini ekle / var olan binaya katil ---
   @UseGuards(JwtAuthGuard)
   @Post('join')
@@ -33,6 +42,16 @@ export class BuildingsController {
       throw new BadRequestException('Bina adi, konum ve daire no zorunlu');
     }
     return this.service.joinOrCreate(req.user.userId, body);
+  }
+
+  // --- Sakin: QR ile binaya katil ---
+  @UseGuards(JwtAuthGuard)
+  @Post('join-by-qr')
+  joinByQr(@Req() req: any, @Body() body: { qrToken: string; flatNo: string; floor?: string }) {
+    if (!body.qrToken || !body.flatNo) {
+      throw new BadRequestException('QR token ve daire no zorunlu');
+    }
+    return this.service.joinByQr(req.user.userId, body.qrToken, body.flatNo, body.floor);
   }
 
   // --- Sakin: bir binaya kayitli miyim? ---

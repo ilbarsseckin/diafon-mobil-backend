@@ -184,4 +184,82 @@ export class BuildingsService {
       flatNo: dto.flatNo,
     };
   }
+
+  /**
+   * QR token ile bina bul + sakin listesi dondur.
+   */
+  async findByQrToken(qrToken: string) {
+    const building = await this.prisma.building.findUnique({
+      where: { qrToken },
+    });
+    if (!building) {
+      return { found: false, message: 'Geçersiz QR kod' };
+    }
+    const residents = await this.prisma.resident.findMany({
+      where: {
+        visible: true,
+        apartment: { buildingId: building.id },
+        user: { blocked: false },
+      },
+      include: {
+        user: { select: { id: true, name: true, photoUrl: true, isOnline: true } },
+        apartment: { select: { flatNo: true, floor: true } },
+      },
+    });
+    return {
+      found: true,
+      building: {
+        id: building.id,
+        buildingName: building.buildingName,
+        address: building.address,
+      },
+      residents: residents.map(r => ({
+        userId: r.user.id,
+        name: r.user.name,
+        photoUrl: r.user.photoUrl,
+        isOnline: r.user.isOnline,
+        flatNo: r.apartment.flatNo,
+        floor: r.apartment.floor,
+      })),
+    };
+  }
+
+  /**
+   * QR token ile binaya sakin olarak katil.
+   */
+  async joinByQr(userId: string, qrToken: string, flatNo: string, floor?: string) {
+    const building = await this.prisma.building.findUnique({ where: { qrToken } });
+    if (!building) {
+      return { success: false, message: 'Geçersiz QR kod' };
+    }
+
+    // Daire var mi, yoksa olustur
+    let apartment = await this.prisma.apartment.findFirst({
+      where: { buildingId: building.id, flatNo },
+    });
+    if (!apartment) {
+      apartment = await this.prisma.apartment.create({
+        data: { buildingId: building.id, flatNo, floor },
+      });
+    }
+
+    // Sakin yap (zaten varsa tekrar ekleme)
+    const existing = await this.prisma.resident.findFirst({
+      where: { userId, apartmentId: apartment.id },
+    });
+    if (!existing) {
+      await this.prisma.resident.create({
+        data: { userId, apartmentId: apartment.id, visible: true },
+      });
+    }
+
+    await this.prisma.user.update({ where: { id: userId }, data: { role: 'RESIDENT' } });
+
+    return {
+      success: true,
+      message: building.buildingName + ' binasina katildiniz',
+      building: { id: building.id, buildingName: building.buildingName },
+      flatNo,
+    };
+  }
 }
