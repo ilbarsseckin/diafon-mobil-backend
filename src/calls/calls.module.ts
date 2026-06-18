@@ -3,6 +3,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { CallsGateway } from './calls.gateway';
 import { PresenceService } from './presence.service';
 import { PushService } from './push.service';
+import { CallsController } from './calls.controller';
+import { CallsService } from './calls.service';
 
 @Module({
   imports: [
@@ -10,6 +12,7 @@ import { PushService } from './push.service';
       secret: process.env.JWT_SECRET || 'dev-secret',
     }),
   ],
-  providers: [CallsGateway, PresenceService, PushService],
+  controllers: [CallsController],
+  providers: [CallsGateway, PresenceService, PushService, CallsService],
 })
 export class CallsModule {}
