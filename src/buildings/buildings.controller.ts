@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, Req } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { BuildingsService } from './buildings.service';
 import { CreateBuildingDto } from './dto/building.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -7,7 +8,7 @@ import { Roles } from '../auth/guards/roles.decorator';
 
 @Controller('buildings')
 export class BuildingsController {
-  constructor(private service: BuildingsService) {}
+  constructor(private service: BuildingsService, private prisma: PrismaService) {}
 
   // --- Herkese acik: konuma gore bina + sakin listesi ---
   @Get('nearby')
@@ -18,6 +19,43 @@ export class BuildingsController {
       throw new BadRequestException('Geçerli konum (lat, lng) gönderin');
     }
     return this.service.findByLocation(latNum, lngNum);
+  }
+
+  // --- Sakin: evini ekle / var olan binaya katil ---
+  @UseGuards(JwtAuthGuard)
+  @Post('join')
+  join(@Req() req: any, @Body() body: {
+    buildingName: string; address?: string;
+    latitude: number; longitude: number;
+    flatNo: string; floor?: string;
+  }) {
+    if (!body.buildingName || body.latitude == null || body.longitude == null || !body.flatNo) {
+      throw new BadRequestException('Bina adi, konum ve daire no zorunlu');
+    }
+    return this.service.joinOrCreate(req.user.userId, body);
+  }
+
+  // --- Sakin: bir binaya kayitli miyim? ---
+  @UseGuards(JwtAuthGuard)
+  @Get('my-status')
+  async myStatus(@Req() req: any) {
+    const resident = await this.prisma.resident.findFirst({
+      where: { userId: req.user.userId },
+      include: {
+        apartment: { include: { building: true } },
+      },
+    });
+    if (!resident) {
+      return { registered: false };
+    }
+    return {
+      registered: true,
+      building: {
+        id: resident.apartment.building.id,
+        buildingName: resident.apartment.building.buildingName,
+      },
+      flatNo: resident.apartment.flatNo,
+    };
   }
 
   // --- Admin: bina yonetimi ---

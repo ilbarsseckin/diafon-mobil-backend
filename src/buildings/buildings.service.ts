@@ -99,4 +99,89 @@ export class BuildingsService {
       })),
     };
   }
+
+  /**
+   * Sakin kayit: konuma yakin bina varsa ona katil, yoksa yeni olustur.
+   * Sonra kullanicinin dairesini ekler ve RESIDENT yapar.
+   */
+  async joinOrCreate(userId: string, dto: {
+    buildingName: string; address?: string;
+    latitude: number; longitude: number;
+    flatNo: string; floor?: string;
+  }) {
+    // 1. Yakinda (30m) bina var mi?
+    const near = await this.prisma.$queryRaw<any[]>`
+      SELECT id, building_name
+      FROM buildings
+      WHERE ST_DWithin(
+        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(${dto.longitude}, ${dto.latitude}), 4326)::geography,
+        30
+      )
+      ORDER BY ST_Distance(
+        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(${dto.longitude}, ${dto.latitude}), 4326)::geography
+      ) ASC
+      LIMIT 1
+    `;
+
+    let buildingId: string;
+    let joined = false;
+
+    if (near && near.length > 0) {
+      // Bina zaten var -> katil
+      buildingId = near[0].id;
+      joined = true;
+    } else {
+      // Yeni bina olustur
+      const b = await this.prisma.building.create({
+        data: {
+          buildingName: dto.buildingName,
+          address: dto.address,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          radiusMeter: 100,
+        },
+      });
+      buildingId = b.id;
+    }
+
+    // 2. Daire var mi, yoksa olustur
+    let apartment = await this.prisma.apartment.findFirst({
+      where: { buildingId, flatNo: dto.flatNo },
+    });
+    if (!apartment) {
+      apartment = await this.prisma.apartment.create({
+        data: { buildingId, flatNo: dto.flatNo, floor: dto.floor },
+      });
+    }
+
+    // 3. Kullaniciyi bu daireye sakin yap (zaten varsa tekrar ekleme)
+    const existing = await this.prisma.resident.findFirst({
+      where: { userId, apartmentId: apartment.id },
+    });
+    if (!existing) {
+      await this.prisma.resident.create({
+        data: { userId, apartmentId: apartment.id, visible: true },
+      });
+    }
+
+    // 4. Kullaniciyi RESIDENT rolune yukselt
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role: 'RESIDENT' },
+    });
+
+    const building = await this.prisma.building.findUnique({ where: { id: buildingId } });
+    return {
+      joined,
+      message: joined ? 'Var olan binaya katildiniz' : 'Yeni bina olusturuldu',
+      building: {
+        id: building!.id,
+        buildingName: building!.buildingName,
+        address: building!.address,
+      },
+      flatNo: dto.flatNo,
+    };
+  }
 }
