@@ -13,6 +13,8 @@ import { Logger } from '@nestjs/common';
 export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private logger = new Logger('CallsGateway');
+  // Misafir cagrilari: callId -> { callerSocketId, callerUserId, receiverUserId }
+  private guestCalls = new Map<string, { callerSocketId: string; callerUserId: string; receiverUserId: string }>();
 
   constructor(
     private jwt: JwtService,
@@ -34,7 +36,11 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.data.userId = userId;
 
       await this.presence.setOnline(userId, client.id);
-      await this.prisma.user.update({ where: { id: userId }, data: { isOnline: true } });
+      if (payload.guest !== true) {
+        await this.prisma.user.update({ where: { id: userId }, data: { isOnline: true } });
+      }
+      client.data.isGuest = payload.guest === true;
+      client.data.guestName = payload.name || 'Ziyaretçi';
       this.logger.log(`Baglandi: user=${userId} socket=${client.id}`);
     } catch (e) {
       this.logger.warn(`Gecersiz token, baglanti reddedildi: ${e.message}`);
@@ -58,46 +64,75 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { receiverUserId: string; buildingId?: string; callerPhotoUrl?: string },
   ) {
     const callerUserId = client.data.userId;
+    const isGuest = client.data.isGuest === true;
     const receiverSocketId = await this.presence.getSocketId(data.receiverUserId);
 
-    // Cagri kaydi olustur
-    const call = await this.prisma.call.create({
-      data: {
+    // Arayan bilgisi (misafir ise sabit Ziyaretci)
+    let caller: any;
+    if (isGuest) {
+      caller = { id: callerUserId, name: client.data.guestName || 'Ziyaretçi', photoUrl: null };
+    } else {
+      caller = await this.prisma.user.findUnique({
+        where: { id: callerUserId },
+        select: { id: true, name: true, photoUrl: true },
+      });
+    }
+
+    // Cagri kaydi (misafir ise DB'ye yazma, gecici callId)
+    let callId: string;
+    if (isGuest) {
+      callId = 'guestcall_' + Math.random().toString(36).substring(2, 14);
+    } else {
+      const call = await this.prisma.call.create({
+        data: {
+          callerUserId,
+          receiverUserId: data.receiverUserId,
+          buildingId: data.buildingId,
+          status: 'RINGING',
+          callerPhotoUrl: data.callerPhotoUrl,
+        },
+      });
+      callId = call.id;
+    }
+
+    // Misafir cagrisini bellekte takip et
+    if (isGuest) {
+      this.guestCalls.set(callId, {
+        callerSocketId: client.id,
         callerUserId,
         receiverUserId: data.receiverUserId,
-        buildingId: data.buildingId,
-        status: 'RINGING',
-        callerPhotoUrl: data.callerPhotoUrl,
-      },
-    });
+      });
+    }
 
     if (!receiverSocketId) {
-      // Karsi taraf offline -> push gonder, arayani beklet (kesme)
-      const callerOff = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { name: true } });
-      await this.push.sendIncomingCall(data.receiverUserId, callerOff?.name || 'Birisi', call.id, callerUserId, data.callerPhotoUrl);
-      client.emit('call:ringing', { callId: call.id });
+      // Karsi taraf offline -> push gonder
+      await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', callId, callerUserId, data.callerPhotoUrl);
+      client.emit('call:ringing', { callId });
       return;
     }
 
-    const caller = await this.prisma.user.findUnique({
-      where: { id: callerUserId },
-      select: { id: true, name: true, photoUrl: true },
-    });
-
     // Ev sahibine gelen cagri bildirimi
     this.server.to(receiverSocketId).emit('call:incoming', {
-      callId: call.id,
+      callId,
       caller,
       callerPhoto: data.callerPhotoUrl || '',
     });
-    client.emit('call:ringing', { callId: call.id });
-    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', call.id, callerUserId, data.callerPhotoUrl);
-    this.logger.log(`Cagri: ${callerUserId} -> ${data.receiverUserId} (call=${call.id})`);
+    client.emit('call:ringing', { callId });
+    await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', callId, callerUserId, data.callerPhotoUrl);
+    this.logger.log(`Cagri: ${callerUserId} (guest=${isGuest}) -> ${data.receiverUserId} (call=${callId})`);
   }
 
   // --- Cagri kabul ---
   @SubscribeMessage('call:accept')
   async onCallAccept(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    // Misafir cagrisi: DB yok, Map'ten arayan socket'i bul
+    if (data.callId.startsWith('guestcall_')) {
+      const g = this.guestCalls.get(data.callId);
+      if (g) {
+        this.server.to(g.callerSocketId).emit('call:accepted', { callId: data.callId });
+      }
+      return;
+    }
     const call = await this.prisma.call.update({
       where: { id: data.callId },
       data: { status: 'ACCEPTED' },
@@ -111,6 +146,14 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- Cagri red ---
   @SubscribeMessage('call:reject')
   async onCallReject(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    if (data.callId.startsWith('guestcall_')) {
+      const g = this.guestCalls.get(data.callId);
+      if (g) {
+        this.server.to(g.callerSocketId).emit('call:rejected', { callId: data.callId });
+        this.guestCalls.delete(data.callId);
+      }
+      return;
+    }
     const call = await this.prisma.call.update({
       where: { id: data.callId },
       data: { status: 'REJECTED', endedAt: new Date() },
@@ -124,6 +167,17 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- Cagri bitir ---
   @SubscribeMessage('call:end')
   async onCallEnd(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    if (data.callId.startsWith('guestcall_')) {
+      const g = this.guestCalls.get(data.callId);
+      if (g) {
+        // Iki tarafa da bitti bildir
+        this.server.to(g.callerSocketId).emit('call:ended', { callId: data.callId });
+        const rsid = await this.presence.getSocketId(g.receiverUserId);
+        if (rsid) this.server.to(rsid).emit('call:ended', { callId: data.callId });
+        this.guestCalls.delete(data.callId);
+      }
+      return;
+    }
     const call = await this.prisma.call.findUnique({ where: { id: data.callId } });
     if (!call) return;
     const duration = call.startedAt ? Math.round((Date.now() - new Date(call.startedAt).getTime()) / 1000) : 0;
@@ -131,7 +185,6 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       where: { id: data.callId },
       data: { status: 'ENDED', endedAt: new Date(), duration },
     });
-    // Iki tarafa da bitti bildir
     for (const uid of [call.callerUserId, call.receiverUserId]) {
       const sid = await this.presence.getSocketId(uid);
       if (sid) this.server.to(sid).emit('call:ended', { callId: call.id });

@@ -17,6 +17,10 @@ async function bootstrap() {
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
   });
+  // Ziyaretci web sayfasi (public klasoru)
+  app.useStaticAssets(join(__dirname, '..', 'public'), {
+    prefix: '/web/',
+  });
   const port = process.env.PORT || 4000;
   await app.listen(port, '0.0.0.0');
   console.log(`Diafon Mobil backend calisiyor: port ${port}`);

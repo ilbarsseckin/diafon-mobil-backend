@@ -3,12 +3,13 @@ import { AuthService } from './auth.service';
 import { RegisterDto, VerifyOtpDto, LoginDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { JwtService } from '@nestjs/jwt';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService, private prisma: PrismaService) {}
+  constructor(private authService: AuthService, private prisma: PrismaService, private jwtService: JwtService) {}
 
   @Post('register')
   register(@Body() dto: RegisterDto) {
@@ -71,5 +72,26 @@ export class AuthController {
       select: { id: true, name: true, phone: true, email: true, role: true, photoUrl: true },
     });
     return user;
+  }
+
+  // Misafir (ziyaretci) token - uygulamasiz arama icin
+  @Post('guest-token')
+  async guestToken(@Body() body: { qrToken: string }) {
+    if (!body.qrToken) {
+      return { success: false, message: 'QR token gerekli' };
+    }
+    const building = await this.prisma.building.findUnique({
+      where: { qrToken: body.qrToken },
+    });
+    if (!building) {
+      return { success: false, message: 'Bina bulunamadi' };
+    }
+    // Misafir icin gecici kimlik (DB'de kullanici degil, sadece token)
+    const guestId = 'guest_' + Math.random().toString(36).substring(2, 12);
+    const token = this.jwtService.sign(
+      { sub: guestId, role: 'GUEST', guest: true, name: 'Ziyaretçi', buildingId: building.id },
+      { secret: process.env.JWT_SECRET || 'dev-secret', expiresIn: '30m' },
+    );
+    return { success: true, token, guestId, buildingName: building.buildingName };
   }
 }
