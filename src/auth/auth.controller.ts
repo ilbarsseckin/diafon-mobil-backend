@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, VerifyOtpDto, LoginDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -45,5 +45,31 @@ export class AuthController {
     const url = `/uploads/${filename}`;
     await this.prisma.user.update({ where: { id: req.user.userId }, data: { photoUrl: url } });
     return { url };
+  }
+
+  // Profil guncelle (isim + email)
+  @UseGuards(JwtAuthGuard)
+  @Post('update-profile')
+  async updateProfile(@Req() req: any, @Body() body: { name?: string; email?: string }) {
+    const data: any = {};
+    if (body.name && body.name.trim()) data.name = body.name.trim();
+    if (body.email !== undefined) data.email = body.email.trim() || null;
+    const user = await this.prisma.user.update({
+      where: { id: req.user.userId },
+      data,
+      select: { id: true, name: true, phone: true, email: true, role: true },
+    });
+    return { success: true, user };
+  }
+
+  // Profilim (guncel bilgiler)
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async me(@Req() req: any) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, name: true, phone: true, email: true, role: true, photoUrl: true },
+    });
+    return user;
   }
 }
