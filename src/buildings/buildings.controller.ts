@@ -83,8 +83,10 @@ export class BuildingsController {
       building: {
         id: resident.apartment.building.id,
         buildingName: resident.apartment.building.buildingName,
+        qrToken: resident.apartment.building.qrToken,
       },
       flatNo: resident.apartment.flatNo,
+      userId: req.user.userId,
     };
   }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBuildingDto } from './dto/building.dto';
@@ -133,7 +134,8 @@ export class BuildingsService {
       buildingId = near[0].id;
       joined = true;
     } else {
-      // Yeni bina olustur
+      // Yeni bina olustur (otomatik QR token ile)
+      const newToken = 'DIAFON-' + randomUUID().replace(/-/g, '');
       const b = await this.prisma.building.create({
         data: {
           buildingName: dto.buildingName,
@@ -141,6 +143,7 @@ export class BuildingsService {
           latitude: dto.latitude,
           longitude: dto.longitude,
           radiusMeter: 100,
+          qrToken: newToken,
         },
       });
       buildingId = b.id;

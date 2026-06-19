@@ -85,13 +85,35 @@
           content.innerHTML = '<div class="error">Bina bulunamadı veya geçersiz QR</div>';
           return;
         }
+        let residents = data.residents || [];
+        // Parametre filtreleri
+        const flatParam = params.get('flat');
+        const userParam = params.get('user');
+        if (flatParam) {
+          residents = residents.filter(function(r){ return String(r.flatNo) === String(flatParam); });
+        }
+        if (userParam) {
+          residents = residents.filter(function(r){ return String(r.userId) === String(userParam); });
+        }
+
         let html = '<div class="building"><h2>' + data.building.buildingName + '</h2>';
         if (data.building.address) html += '<p>' + data.building.address + '</p>';
+        if (flatParam) html += '<p>Daire ' + flatParam + '</p>';
         html += '</div>';
-        if (!data.residents || data.residents.length === 0) {
-          html += '<div class="error">Bu binada kayıtlı sakin yok</div>';
+
+        // Bireysel QR (tek kisi) -> direkt arama baslat
+        if (userParam && residents.length === 1) {
+          html += '<div class="resident"><div class="info"><div class="name">' + residents[0].name + '</div>'
+            + '<div class="flat">Daire ' + (residents[0].flatNo || '-') + '</div></div>'
+            + '<button onclick="startCall(\'' + residents[0].userId + '\',\'' + residents[0].name.replace(/'/g, "") + '\')">Ara</button></div>';
+          content.innerHTML = html;
+          return;
+        }
+
+        if (residents.length === 0) {
+          html += '<div class="error">Aranacak sakin bulunamadı</div>';
         } else {
-          data.residents.forEach(function(r) {
+          residents.forEach(function(r) {
             html += '<div class="resident"><div class="info"><div class="name">' + r.name + '</div>'
               + '<div class="flat">Daire ' + (r.flatNo || '-') + ' • Kat ' + (r.floor || '-') + '</div></div>'
               + '<button onclick="startCall(\'' + r.userId + '\',\'' + r.name.replace(/'/g, "") + '\')">Ara</button></div>';
