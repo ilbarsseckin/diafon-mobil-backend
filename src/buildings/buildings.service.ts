@@ -262,4 +262,32 @@ export class BuildingsService {
       flatNo,
     };
   }
+
+  /**
+   * Bir konuma yakin TUM binalari listele (cift bina onleme icin).
+   * Sadece bina bilgisi + mesafe doner (sakin yok).
+   */
+  async nearbyBuildings(lat: number, lng: number, radiusMeters = 150) {
+    const buildings = await this.prisma.$queryRaw<any[]>`
+      SELECT id, building_name, address,
+        ST_Distance(
+          geography(ST_MakePoint(longitude, latitude)),
+          geography(ST_MakePoint(${lng}, ${lat}))
+        ) AS distance
+      FROM buildings
+      WHERE ST_DWithin(
+        geography(ST_MakePoint(longitude, latitude)),
+        geography(ST_MakePoint(${lng}, ${lat})),
+        ${radiusMeters}
+      )
+      ORDER BY distance ASC
+      LIMIT 10
+    `;
+    return buildings.map(b => ({
+      id: b.id,
+      buildingName: b.building_name,
+      address: b.address,
+      distance: Math.round(Number(b.distance)),
+    }));
+  }
 }

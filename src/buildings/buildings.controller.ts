@@ -30,6 +30,17 @@ export class BuildingsController {
     return this.service.findByQrToken(token);
   }
 
+  // --- Yakindaki TUM binalar (cift bina onleme) ---
+  @Get('nearby-list')
+  nearbyList(@Query('lat') lat: string, @Query('lng') lng: string) {
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    if (isNaN(latNum) || isNaN(lngNum)) {
+      throw new BadRequestException('Konum gerekli');
+    }
+    return this.service.nearbyBuildings(latNum, lngNum);
+  }
+
   // --- Sakin: evini ekle / var olan binaya katil ---
   @UseGuards(JwtAuthGuard)
   @Post('join')
