@@ -13,14 +13,14 @@
     .building { padding: 16px; background: white; margin: 12px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
     .building h2 { font-size: 18px; color: #E63946; }
     .building p { color: #666; font-size: 14px; margin-top: 4px; }
-    .resident { display: flex; align-items: center; padding: 14px 16px; background: white; margin: 8px 12px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-    .resident .info { flex: 1; }
-    .resident .name { font-weight: 600; }
-    .resident .flat { color: #888; font-size: 13px; }
-    .resident button { background: #E63946; color: white; border: none; padding: 10px 18px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .item { display: flex; align-items: center; padding: 14px 16px; background: white; margin: 8px 12px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .item .info { flex: 1; }
+    .item .name { font-weight: 600; }
+    .item .sub { color: #888; font-size: 13px; margin-top: 2px; }
+    .item button { background: #E63946; color: white; border: none; padding: 10px 18px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .loading, .error { text-align: center; padding: 40px; color: #888; }
+    .section-title { padding: 12px 16px 4px; color: #999; font-size: 13px; font-weight: 600; }
 
-    /* Çağrı ekranı */
     #callScreen { display: none; position: fixed; inset: 0; background: #111; z-index: 100; flex-direction: column; }
     #remoteVideo { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; background: #222; }
     #localVideo { position: absolute; top: 16px; right: 16px; width: 100px; height: 140px; object-fit: cover; border-radius: 12px; border: 2px solid white; z-index: 2; background: #333; }
@@ -28,7 +28,7 @@
     .call-info .peer-name { font-size: 20px; font-weight: bold; }
     .call-info .status { font-size: 14px; margin-top: 6px; opacity: 0.85; }
     .call-controls { position: absolute; bottom: 40px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; z-index: 2; }
-    .call-controls button { width: 60px; height: 60px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; }
+    .call-controls button { width: 60px; height: 60px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer; color: white; }
     .btn-end { background: #E63946; }
     .btn-mute { background: rgba(255,255,255,0.2); }
   </style>
@@ -37,7 +37,6 @@
   <div class="header"><h1>🚪 Mobil Diafon</h1></div>
   <div id="content"><div class="loading">Yükleniyor...</div></div>
 
-  <!-- Çağrı ekranı -->
   <div id="callScreen">
     <video id="remoteVideo" autoplay playsinline></video>
     <video id="localVideo" autoplay playsinline muted></video>
@@ -57,13 +56,8 @@
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
 
-    let socket = null;
-    let pc = null;
-    let localStream = null;
-    let callId = null;
-    let guestToken = null;
-    let currentPeerId = null;
-    let micOn = true;
+    let socket = null, pc = null, localStream = null;
+    let callId = null, guestToken = null, currentPeerId = null, micOn = true;
 
     const iceConfig = {
       iceServers: [
@@ -74,125 +68,124 @@
 
     async function load() {
       const content = document.getElementById('content');
-      if (!token) {
-        content.innerHTML = '<div class="error">Geçersiz bağlantı (token yok)</div>';
-        return;
-      }
+      if (!token) { content.innerHTML = '<div class="error">Geçersiz bağlantı</div>'; return; }
       try {
         const res = await fetch(API + '/buildings/by-qr?token=' + encodeURIComponent(token));
         const data = await res.json();
-        if (!data.found || !data.building) {
-          content.innerHTML = '<div class="error">Bina bulunamadı veya geçersiz QR</div>';
-          return;
-        }
+        if (!data.found || !data.building) { content.innerHTML = '<div class="error">Bina bulunamadı veya geçersiz QR</div>'; return; }
+
         let residents = data.residents || [];
-        // Parametre filtreleri
         const flatParam = params.get('flat');
         const userParam = params.get('user');
-        if (flatParam) {
-          residents = residents.filter(function(r){ return String(r.flatNo) === String(flatParam); });
-        }
-        if (userParam) {
-          residents = residents.filter(function(r){ return String(r.userId) === String(userParam); });
-        }
+        if (flatParam) residents = residents.filter(r => String(r.flatNo) === String(flatParam));
+        if (userParam) residents = residents.filter(r => String(r.userId) === String(userParam));
 
         let html = '<div class="building"><h2>' + data.building.buildingName + '</h2>';
         if (data.building.address) html += '<p>' + data.building.address + '</p>';
         if (flatParam) html += '<p>Daire ' + flatParam + '</p>';
         html += '</div>';
 
-        // Bireysel QR (tek kisi) -> direkt arama baslat
+        // Kisisel QR -> direkt kisi
         if (userParam && residents.length === 1) {
-          html += '<div class="resident"><div class="info"><div class="name">' + residents[0].name + '</div>'
-            + '<div class="flat">Daire ' + (residents[0].flatNo || '-') + '</div></div>'
-            + '<button onclick="startCall(\'' + residents[0].userId + '\',\'' + residents[0].name.replace(/'/g, "") + '\')">Ara</button></div>';
+          const r = residents[0];
+          html += '<div class="item"><div class="info"><div class="name">' + r.name + '</div>'
+            + '<div class="sub">Daire ' + (r.flatNo || '-') + '</div></div>'
+            + '<button onclick="callUser(\'' + r.userId + '\',\'' + r.name.replace(/'/g,"") + '\')">Ara</button></div>';
           content.innerHTML = html;
           return;
         }
 
-        if (residents.length === 0) {
-          html += '<div class="error">Aranacak sakin bulunamadı</div>';
-        } else {
-          residents.forEach(function(r) {
-            html += '<div class="resident"><div class="info"><div class="name">' + r.name + '</div>'
-              + '<div class="flat">Daire ' + (r.flatNo || '-') + ' • Kat ' + (r.floor || '-') + '</div></div>'
-              + '<button onclick="startCall(\'' + r.userId + '\',\'' + r.name.replace(/'/g, "") + '\')">Ara</button></div>';
-          });
-        }
+        if (residents.length === 0) { html += '<div class="error">Aranacak sakin bulunamadı</div>'; content.innerHTML = html; return; }
+
+        // Daireye gore grupla
+        const flats = {};
+        residents.forEach(r => {
+          const key = r.apartmentId || r.flatNo;
+          if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, people: [] };
+          flats[key].people.push(r);
+        });
+
+        html += '<div class="section-title">DAİRELER</div>';
+        Object.values(flats).forEach(f => {
+          const count = f.people.length;
+          html += '<div class="item"><div class="info"><div class="name">Daire ' + (f.flatNo || '-') + '</div>'
+            + '<div class="sub">' + count + ' kişi' + (f.floor ? ' • Kat ' + f.floor : '') + '</div></div>'
+            + '<button onclick="callFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')">Ara</button></div>';
+        });
+
         content.innerHTML = html;
       } catch (e) {
         content.innerHTML = '<div class="error">Bağlantı hatası: ' + e.message + '</div>';
       }
     }
 
-    async function startCall(userId, name) {
-      currentPeerId = userId;
+    async function setupCall(name) {
       document.getElementById('peerName').textContent = name;
       document.getElementById('callStatus').textContent = 'Bağlanıyor...';
       document.getElementById('callScreen').style.display = 'flex';
 
+      const gtRes = await fetch(API + '/auth/guest-token', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qrToken: token })
+      });
+      const gtData = await gtRes.json();
+      if (!gtData.success) { alert('Bağlantı kurulamadı'); endCall(); return false; }
+      guestToken = gtData.token;
+
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
+      document.getElementById('localVideo').srcObject = localStream;
+
+      pc = new RTCPeerConnection(iceConfig);
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      pc.ontrack = (e) => {
+        document.getElementById('remoteVideo').srcObject = e.streams[0];
+        document.getElementById('callStatus').textContent = 'Görüşülüyor';
+      };
+      pc.onicecandidate = (e) => {
+        if (e.candidate && callId && currentPeerId) {
+          socket.emit('webrtc:ice', { toUserId: currentPeerId, callId, candidate: e.candidate.toJSON() });
+        }
+      };
+
+      socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token: guestToken } });
+      socket.on('call:ringing', (d) => { callId = d.callId; });
+      socket.on('call:accepted', async (d) => {
+        callId = d.callId;
+        currentPeerId = d.accepterId || currentPeerId; // kabul eden kisi
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc:offer', { toUserId: currentPeerId, callId, sdp: { sdp: offer.sdp, type: offer.type } });
+      });
+      socket.on('webrtc:answer', async (d) => { await pc.setRemoteDescription(new RTCSessionDescription(d.sdp)); });
+      socket.on('webrtc:ice', async (d) => { try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch(e){} });
+      socket.on('call:rejected', () => { document.getElementById('callStatus').textContent = 'Reddedildi'; setTimeout(endCall, 1500); });
+      socket.on('call:ended', () => endCall());
+      socket.on('call:unavailable', () => { document.getElementById('callStatus').textContent = 'Sakin çevrimdışı'; setTimeout(endCall, 2000); });
+      return true;
+    }
+
+    // Tek kisi ara (kisisel QR)
+    async function callUser(userId, name) {
+      currentPeerId = userId;
       try {
-        // 1. Misafir token al
-        const gtRes = await fetch(API + '/auth/guest-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qrToken: token })
-        });
-        const gtData = await gtRes.json();
-        if (!gtData.success) { alert('Bağlantı kurulamadı'); endCall(); return; }
-        guestToken = gtData.token;
-
-        // 2. Kamera + mikrofon
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
-        document.getElementById('localVideo').srcObject = localStream;
-
-        // 3. PeerConnection
-        pc = new RTCPeerConnection(iceConfig);
-        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-        pc.ontrack = (e) => {
-          document.getElementById('remoteVideo').srcObject = e.streams[0];
-          document.getElementById('callStatus').textContent = 'Görüşülüyor';
-        };
-        pc.onicecandidate = (e) => {
-          if (e.candidate && callId) {
-            socket.emit('webrtc:ice', { toUserId: currentPeerId, callId: callId, candidate: e.candidate.toJSON() });
-          }
-        };
-
-        // 4. Socket bağlan
-        socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token: guestToken } });
-
+        if (!await setupCall(name)) return;
         socket.on('connect', () => {
           document.getElementById('callStatus').textContent = name + ' aranıyor...';
-          socket.emit('call:start', { receiverUserId: currentPeerId });
+          socket.emit('call:start', { receiverUserId: userId });
         });
+      } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
+    }
 
-        socket.on('call:ringing', (data) => { callId = data.callId; });
-
-        // Misafir = arayan, offer yapar
-        socket.on('call:accepted', async (data) => {
-          callId = data.callId;
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit('webrtc:offer', { toUserId: currentPeerId, callId: callId, sdp: { sdp: offer.sdp, type: offer.type } });
+    // Daire ara (dairedeki herkes)
+    async function callFlat(apartmentId, name) {
+      currentPeerId = null; // kabul eden belli olunca set edilecek
+      try {
+        if (!await setupCall(name)) return;
+        socket.on('connect', () => {
+          document.getElementById('callStatus').textContent = name + ' çalınıyor...';
+          socket.emit('call:start-flat', { apartmentId });
         });
-
-        socket.on('webrtc:answer', async (data) => {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        });
-
-        socket.on('webrtc:ice', async (data) => {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) {}
-        });
-
-        socket.on('call:rejected', () => { document.getElementById('callStatus').textContent = 'Reddedildi'; setTimeout(endCall, 1500); });
-        socket.on('call:ended', () => endCall());
-        socket.on('call:unavailable', () => { document.getElementById('callStatus').textContent = 'Sakin çevrimdışı'; setTimeout(endCall, 2000); });
-
-      } catch (e) {
-        document.getElementById('callStatus').textContent = 'Hata: ' + e.message;
-        setTimeout(endCall, 2000);
-      }
+      } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 
     function toggleMute() {
@@ -203,11 +196,11 @@
     }
 
     function endCall() {
-      if (callId && socket) socket.emit('call:end', { callId: callId });
+      if (callId && socket) socket.emit('call:end', { callId });
       if (pc) { pc.close(); pc = null; }
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       if (socket) { socket.disconnect(); socket = null; }
-      callId = null;
+      callId = null; currentPeerId = null;
       document.getElementById('callScreen').style.display = 'none';
     }
 

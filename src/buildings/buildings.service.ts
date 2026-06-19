@@ -78,7 +78,7 @@ export class BuildingsService {
       },
       include: {
         user: { select: { id: true, name: true, photoUrl: true, isOnline: true } },
-        apartment: { select: { flatNo: true, floor: true } },
+        apartment: { select: { id: true, flatNo: true, floor: true } },
       },
     });
 
@@ -95,6 +95,7 @@ export class BuildingsService {
         name: r.user.name,
         photoUrl: r.user.photoUrl,
         isOnline: r.user.isOnline,
+        apartmentId: r.apartment.id,
         flatNo: r.apartment.flatNo,
         floor: r.apartment.floor,
       })),
@@ -206,7 +207,7 @@ export class BuildingsService {
       },
       include: {
         user: { select: { id: true, name: true, photoUrl: true, isOnline: true } },
-        apartment: { select: { flatNo: true, floor: true } },
+        apartment: { select: { id: true, flatNo: true, floor: true } },
       },
     });
     return {
@@ -221,6 +222,7 @@ export class BuildingsService {
         name: r.user.name,
         photoUrl: r.user.photoUrl,
         isOnline: r.user.isOnline,
+        apartmentId: r.apartment.id,
         flatNo: r.apartment.flatNo,
         floor: r.apartment.floor,
       })),

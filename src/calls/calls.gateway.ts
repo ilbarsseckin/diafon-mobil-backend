@@ -15,6 +15,8 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private logger = new Logger('CallsGateway');
   // Misafir cagrilari: callId -> { callerSocketId, callerUserId, receiverUserId }
   private guestCalls = new Map<string, { callerSocketId: string; callerUserId: string; receiverUserId: string }>();
+  // Daire (grup) cagrilari: callId -> { tum alicilar, cevaplandi mi }
+  private flatCallTargets = new Map<string, { receiverIds: string[]; answered: boolean }>();
 
   constructor(
     private jwt: JwtService,
@@ -123,8 +125,84 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- Cagri kabul ---
+  // --- Daire bazli cagri: dairedeki TUM sakinlere cal ---
+  @SubscribeMessage('call:start-flat')
+  async onCallStartFlat(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { apartmentId: string },
+  ) {
+    const callerUserId = client.data.userId;
+    const isGuest = client.data.isGuest === true;
+
+    // Dairedeki tum sakinler
+    const residents = await this.prisma.resident.findMany({
+      where: { apartmentId: data.apartmentId, visible: true, user: { blocked: false } },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    if (residents.length === 0) {
+      client.emit('call:unavailable', { reason: 'Dairede sakin yok' });
+      return;
+    }
+
+    // Tek bir callId (grup cagrisi)
+    const callId = 'flatcall_' + Math.random().toString(36).substring(2, 14);
+
+    // Arayan bilgisi
+    const caller = isGuest
+      ? { id: callerUserId, name: client.data.guestName || 'Ziyaretçi', photoUrl: null }
+      : await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { id: true, name: true, photoUrl: true } });
+
+    // Grup cagrisini bellekte takip et (ilk acan kazanir)
+    this.guestCalls.set(callId, {
+      callerSocketId: client.id,
+      callerUserId,
+      receiverUserId: residents[0].user.id, // ilk sakin (placeholder)
+    });
+
+    const receiverIds = residents.map(r => r.user.id);
+    this.flatCallTargets.set(callId, { receiverIds, answered: false });
+
+    // Tum sakinlere cagri gonder (online -> socket, offline -> push)
+    for (const r of residents) {
+      const sid = await this.presence.getSocketId(r.user.id);
+      if (sid) {
+        this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: '' });
+      }
+      await this.push.sendIncomingCall(r.user.id, caller?.name || 'Ziyaretçi', callId, callerUserId, undefined);
+    }
+
+    client.emit('call:ringing', { callId });
+    this.logger.log(`Daire cagrisi: ${callerUserId} -> daire ${data.apartmentId} (${receiverIds.length} kisi, call=${callId})`);
+  }
+
   @SubscribeMessage('call:accept')
   async onCallAccept(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    // Daire (grup) cagrisi: ilk acan kazanir, digerlerini sustur
+    if (data.callId.startsWith('flatcall_')) {
+      const flat = this.flatCallTargets.get(data.callId);
+      const g = this.guestCalls.get(data.callId);
+      if (!flat || flat.answered) {
+        // Zaten baskasi acmis -> bu kisiye "alindi" de
+        client.emit('call:taken', { callId: data.callId });
+        return;
+      }
+      flat.answered = true;
+      const accepterId = client.data.userId;
+      // Arayana: kabul edildi (WebRTC baslasin), kabul eden kisiyle
+      if (g) {
+        this.server.to(g.callerSocketId).emit('call:accepted', { callId: data.callId, accepterId });
+        // guestCalls'taki receiver'i guncelle (artik kabul eden kisi)
+        g.receiverUserId = accepterId;
+      }
+      // Diger sakinlere: cagri baskasi tarafindan alindi
+      for (const uid of flat.receiverIds) {
+        if (uid === accepterId) continue;
+        const sid = await this.presence.getSocketId(uid);
+        if (sid) this.server.to(sid).emit('call:taken', { callId: data.callId });
+      }
+      return;
+    }
+
     // Misafir cagrisi: DB yok, Map'ten arayan socket'i bul
     if (data.callId.startsWith('guestcall_')) {
       const g = this.guestCalls.get(data.callId);
