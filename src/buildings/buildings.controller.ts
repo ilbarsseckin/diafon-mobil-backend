@@ -159,6 +159,31 @@ export class BuildingsController {
     return { success: true };
   }
 
+  // --- Bir binanin dairelerini listele (sakin secimi icin) ---
+  @Get('building-flats')
+  async buildingFlats(@Query('buildingId') buildingId: string) {
+    const building = await this.prisma.building.findUnique({
+      where: { id: buildingId },
+      select: { id: true, buildingName: true, requireApproval: true },
+    });
+    if (!building) return { found: false };
+    const apartments = await this.prisma.apartment.findMany({
+      where: { buildingId },
+      include: { residents: { where: { approved: true }, select: { id: true } } },
+      orderBy: { flatNo: 'asc' },
+    });
+    return {
+      found: true,
+      building,
+      flats: apartments.map(a => ({
+        apartmentId: a.id,
+        flatNo: a.flatNo,
+        floor: a.floor,
+        residentCount: a.residents.length,
+      })),
+    };
+  }
+
   // --- YONETICI: yapi kur (site + bloklar + daireler) ---
   @UseGuards(JwtAuthGuard)
   @Post('create-structure')
