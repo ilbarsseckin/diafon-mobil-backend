@@ -223,8 +223,34 @@ export class BuildingsService {
         apartment: { select: { id: true, flatNo: true, floor: true } },
       },
     });
+    // Bu bina bir siteye aitse, kardes bloklari da getir
+    let blocks: any[] = [];
+    if (building.siteName) {
+      const siblingBlocks = await this.prisma.building.findMany({
+        where: { siteName: building.siteName },
+        select: { id: true, buildingName: true, blockName: true, qrToken: true },
+        orderBy: { blockName: 'asc' },
+      });
+      // Her blok icin sakin sayisi
+      for (const blk of siblingBlocks) {
+        const cnt = await this.prisma.resident.count({
+          where: { approved: true, visible: true, user: { blocked: false }, apartment: { buildingId: blk.id } },
+        });
+        blocks.push({
+          buildingId: blk.id,
+          buildingName: blk.buildingName,
+          blockName: blk.blockName,
+          qrToken: blk.qrToken,
+          residentCount: cnt,
+        });
+      }
+    }
+
     return {
       found: true,
+      isSite: !!building.siteName,
+      siteName: building.siteName || null,
+      blocks,
       building: {
         id: building.id,
         buildingName: building.buildingName,
@@ -256,6 +282,10 @@ export class BuildingsService {
       where: { buildingId: building.id, flatNo },
     });
     if (!apartment) {
+      // Yoneticili binada olmayan daireye katilim YOK (yonetici yapiyi kurdu)
+      if (building.requireApproval && !apartment) {
+        return { success: false, message: 'Bu binada böyle bir daire yok. Yöneticinin tanımladığı daireyi seçin.' };
+      }
       apartment = await this.prisma.apartment.create({
         data: { buildingId: building.id, flatNo, floor },
       });

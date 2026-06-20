@@ -20,6 +20,7 @@
     .item button { background: #E63946; color: white; border: none; padding: 10px 18px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .loading, .error { text-align: center; padding: 40px; color: #888; }
     .section-title { padding: 12px 16px 4px; color: #999; font-size: 13px; font-weight: 600; }
+    .back-btn { display: inline-flex; align-items: center; gap: 6px; margin: 12px; padding: 8px 14px; background: white; border: none; border-radius: 20px; color: #E63946; font-weight: 600; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
     #callScreen { display: none; position: fixed; inset: 0; background: #111; z-index: 100; flex-direction: column; }
     #remoteVideo { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; background: #222; }
@@ -51,13 +52,14 @@
   </div>
 
   <script>
-    const API = 'http://128.140.127.151:4000/api';
-    const SOCKET_URL = 'http://128.140.127.151:4000';
+    const API = 'https://mobildiafon.com/api';
+    const SOCKET_URL = 'https://mobildiafon.com';
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
 
     let socket = null, pc = null, localStream = null;
     let callId = null, guestToken = null, currentPeerId = null, micOn = true;
+    let siteData = null; // site ise blok listesi burada
 
     const iceConfig = {
       iceServers: [
@@ -72,51 +74,111 @@
       try {
         const res = await fetch(API + '/buildings/by-qr?token=' + encodeURIComponent(token));
         const data = await res.json();
-        if (!data.found || !data.building) { content.innerHTML = '<div class="error">Bina bulunamadı veya geçersiz QR</div>'; return; }
+        if (!data.found) { content.innerHTML = '<div class="error">Bina bulunamadı veya geçersiz QR</div>'; return; }
 
-        let residents = data.residents || [];
         const flatParam = params.get('flat');
         const userParam = params.get('user');
-        if (flatParam) residents = residents.filter(r => String(r.flatNo) === String(flatParam));
-        if (userParam) residents = residents.filter(r => String(r.userId) === String(userParam));
 
-        let html = '<div class="building"><h2>' + data.building.buildingName + '</h2>';
-        if (data.building.address) html += '<p>' + data.building.address + '</p>';
-        if (flatParam) html += '<p>Daire ' + flatParam + '</p>';
-        html += '</div>';
-
-        // Kisisel QR -> direkt kisi
-        if (userParam && residents.length === 1) {
-          const r = residents[0];
-          html += '<div class="item"><div class="info"><div class="name">' + r.name + '</div>'
-            + '<div class="sub">Daire ' + (r.flatNo || '-') + '</div></div>'
-            + '<button onclick="callUser(\'' + r.userId + '\',\'' + r.name.replace(/'/g,"") + '\')">Ara</button></div>';
-          content.innerHTML = html;
+        // SITE ise ve ozel parametre yoksa -> blok secim ekrani
+        if (data.isSite && data.blocks && data.blocks.length > 0 && !flatParam && !userParam) {
+          siteData = data;
+          renderBlocks(data);
           return;
         }
 
-        if (residents.length === 0) { html += '<div class="error">Aranacak sakin bulunamadı</div>'; content.innerHTML = html; return; }
-
-        // Daireye gore grupla
-        const flats = {};
-        residents.forEach(r => {
-          const key = r.apartmentId || r.flatNo;
-          if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, people: [] };
-          flats[key].people.push(r);
-        });
-
-        html += '<div class="section-title">DAİRELER</div>';
-        Object.values(flats).forEach(f => {
-          const count = f.people.length;
-          html += '<div class="item"><div class="info"><div class="name">Daire ' + (f.flatNo || '-') + '</div>'
-            + '<div class="sub">' + count + ' kişi' + (f.floor ? ' • Kat ' + f.floor : '') + '</div></div>'
-            + '<button onclick="callFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')">Ara</button></div>';
-        });
-
-        content.innerHTML = html;
+        // Tek bina veya flat/user parametreli -> direkt sakinler/daireler
+        renderResidents(data, flatParam, userParam);
       } catch (e) {
         content.innerHTML = '<div class="error">Bağlantı hatası: ' + e.message + '</div>';
       }
+    }
+
+    function renderBlocks(data) {
+      const content = document.getElementById('content');
+      let html = '<div class="building"><h2>' + data.siteName + '</h2><p>Lütfen blok seçin</p></div>';
+      html += '<div class="section-title">BLOKLAR</div>';
+      data.blocks.forEach(b => {
+        const label = b.blockName || b.buildingName;
+        html += '<div class="item" onclick="selectBlock(\'' + b.qrToken + '\')" style="cursor:pointer">'
+          + '<div class="info"><div class="name">' + label + '</div>'
+          + '<div class="sub">' + b.residentCount + ' sakin</div></div>'
+          + '<button>Seç ›</button></div>';
+      });
+      content.innerHTML = html;
+    }
+
+    async function selectBlock(blockToken) {
+      const content = document.getElementById('content');
+      content.innerHTML = '<div class="loading">Yükleniyor...</div>';
+      try {
+        const res = await fetch(API + '/buildings/by-qr?token=' + encodeURIComponent(blockToken));
+        const data = await res.json();
+        renderResidents(data, null, null, blockToken);
+      } catch (e) {
+        content.innerHTML = '<div class="error">Hata: ' + e.message + '</div>';
+      }
+    }
+
+    function renderResidents(data, flatParam, userParam, blockToken) {
+      const content = document.getElementById('content');
+      let residents = data.residents || [];
+      if (flatParam) residents = residents.filter(r => String(r.flatNo) === String(flatParam));
+      if (userParam) residents = residents.filter(r => String(r.userId) === String(userParam));
+
+      let html = '';
+      // Site icindeysek geri butonu
+      if (siteData) {
+        html += '<button class="back-btn" onclick="renderBlocks(siteData)">‹ Bloklara dön</button>';
+      }
+      html += '<div class="building"><h2>' + data.building.buildingName + '</h2>';
+      if (data.building.address) html += '<p>' + data.building.address + '</p>';
+      if (flatParam) html += '<p>Daire ' + flatParam + '</p>';
+      html += '</div>';
+
+      // Kisisel QR -> direkt kisi
+      if (userParam && residents.length === 1) {
+        const r = residents[0];
+        html += '<div class="item"><div class="info"><div class="name">' + r.name + '</div>'
+          + '<div class="sub">Daire ' + (r.flatNo || '-') + '</div></div>'
+          + '<button onclick="callUser(\'' + r.userId + '\',\'' + r.name.replace(/'/g,"") + '\')">Ara</button></div>';
+        content.innerHTML = html;
+        return;
+      }
+
+      if (residents.length === 0) {
+        html += '<div class="error">Bu blokta henüz kayıtlı sakin yok</div>';
+        content.innerHTML = html;
+        return;
+      }
+
+      // Daireye gore grupla
+      const flats = {};
+      residents.forEach(r => {
+        const key = r.apartmentId || r.flatNo;
+        if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, people: [] };
+        flats[key].people.push(r);
+      });
+
+      html += '<div class="section-title">DAİRELER</div>';
+      Object.values(flats).forEach(f => {
+        const count = f.people.length;
+        // Isim ozeti: tek kisi -> adi, cok kisi -> "Ad +N"
+        let names = f.people.map(p => p.name).filter(Boolean);
+        let nameLabel = '';
+        if (names.length === 1) nameLabel = names[0];
+        else if (names.length > 1) nameLabel = names[0] + ' +' + (names.length - 1);
+        // Foto: ilk kisinin fotosu
+        const firstPhoto = f.people[0] && f.people[0].photoUrl ? f.people[0].photoUrl : null;
+        const photoHtml = firstPhoto
+          ? '<img src="' + (firstPhoto.startsWith('http') ? firstPhoto : 'https://mobildiafon.com' + firstPhoto) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;margin-right:12px;">'
+          : '<div style="width:46px;height:46px;border-radius:50%;background:#f0e0e2;display:flex;align-items:center;justify-content:center;margin-right:12px;font-size:20px;">🏠</div>';
+        html += '<div class="item">' + photoHtml + '<div class="info">'
+          + '<div class="name">Daire ' + (f.flatNo || '-') + (nameLabel ? ': ' + nameLabel : '') + '</div>'
+          + '<div class="sub">' + count + ' kişi' + (f.floor ? ' • Kat ' + f.floor : '') + '</div></div>'
+          + '<button onclick="callFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')">Ara</button></div>';
+      });
+
+      content.innerHTML = html;
     }
 
     async function setupCall(name) {
@@ -151,7 +213,7 @@
       socket.on('call:ringing', (d) => { callId = d.callId; });
       socket.on('call:accepted', async (d) => {
         callId = d.callId;
-        currentPeerId = d.accepterId || currentPeerId; // kabul eden kisi
+        currentPeerId = d.accepterId || currentPeerId;
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socket.emit('webrtc:offer', { toUserId: currentPeerId, callId, sdp: { sdp: offer.sdp, type: offer.type } });
@@ -160,11 +222,10 @@
       socket.on('webrtc:ice', async (d) => { try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch(e){} });
       socket.on('call:rejected', () => { document.getElementById('callStatus').textContent = 'Reddedildi'; setTimeout(endCall, 1500); });
       socket.on('call:ended', () => endCall());
-      socket.on('call:unavailable', () => { document.getElementById('callStatus').textContent = 'Sakin çevrimdışı'; setTimeout(endCall, 2000); });
+      socket.on('call:unavailable', () => { document.getElementById('callStatus').textContent = 'Cevap verilmedi'; setTimeout(endCall, 2000); });
       return true;
     }
 
-    // Tek kisi ara (kisisel QR)
     async function callUser(userId, name) {
       currentPeerId = userId;
       try {
@@ -176,9 +237,8 @@
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 
-    // Daire ara (dairedeki herkes)
     async function callFlat(apartmentId, name) {
-      currentPeerId = null; // kabul eden belli olunca set edilecek
+      currentPeerId = null;
       try {
         if (!await setupCall(name)) return;
         socket.on('connect', () => {
