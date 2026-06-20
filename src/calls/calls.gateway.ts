@@ -173,6 +173,23 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.emit('call:ringing', { callId });
     this.logger.log(`Daire cagrisi: ${callerUserId} -> daire ${data.apartmentId} (${receiverIds.length} kisi, call=${callId})`);
+
+    // 30 sn timeout: cevap yoksa arayana bildir, cagriyi temizle
+    const callerSocketIdForTimeout = client.id;
+    setTimeout(() => {
+      const flat = this.flatCallTargets.get(callId);
+      if (flat && !flat.answered) {
+        this.server.to(callerSocketIdForTimeout).emit('call:unavailable', { callId, reason: 'Cevap verilmedi' });
+        // Calan sakinlere de durdur sinyali
+        for (const uid of flat.receiverIds) {
+          this.presence.getSocketId(uid).then(sid => {
+            if (sid) this.server.to(sid).emit('call:taken', { callId });
+          });
+        }
+        this.flatCallTargets.delete(callId);
+        this.guestCalls.delete(callId);
+      }
+    }, 30000);
   }
 
   @SubscribeMessage('call:accept')
@@ -224,6 +241,25 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- Cagri red ---
   @SubscribeMessage('call:reject')
   async onCallReject(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    // Daire (grup) cagrisi: bir kisi reddederse cikar, HERKES reddederse arayana bildir
+    if (data.callId.startsWith('flatcall_')) {
+      const flat = this.flatCallTargets.get(data.callId);
+      const g = this.guestCalls.get(data.callId);
+      if (!flat || flat.answered) return; // zaten cevaplandi
+      const rejecterId = client.data.userId;
+      // Reddeden kisiyi listeden cikar
+      flat.receiverIds = flat.receiverIds.filter(id => id !== rejecterId);
+      // Kimse kalmadiysa -> arayana reddedildi
+      if (flat.receiverIds.length === 0) {
+        if (g) {
+          this.server.to(g.callerSocketId).emit('call:rejected', { callId: data.callId });
+        }
+        this.flatCallTargets.delete(data.callId);
+        this.guestCalls.delete(data.callId);
+      }
+      return;
+    }
+
     if (data.callId.startsWith('guestcall_')) {
       const g = this.guestCalls.get(data.callId);
       if (g) {
