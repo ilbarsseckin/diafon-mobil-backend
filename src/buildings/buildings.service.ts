@@ -309,4 +309,59 @@ export class BuildingsService {
       distance: Math.round(Number(b.distance)),
     }));
   }
+
+  /**
+   * YONETICI yapi kurma: site + bloklar + her blokta N daire uret.
+   * Premium kullanici cagirir, owner olur, onay sistemi acilir.
+   */
+  async createStructure(userId: string, dto: {
+    siteName?: string;
+    latitude: number;
+    longitude: number;
+    blocks: { blockName?: string; flatCount: number }[];
+  }) {
+    // Premium kontrol
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
+    if (!user?.isPremium) {
+      return { success: false, message: 'Yapı kurmak için premium üyelik gerekli' };
+    }
+    if (!dto.blocks || dto.blocks.length === 0) {
+      return { success: false, message: 'En az bir blok girin' };
+    }
+
+    const createdBuildings: any[] = [];
+    for (const block of dto.blocks) {
+      const count = Math.min(Math.max(block.flatCount || 0, 1), 500); // 1-500 daire siniri
+      const token = 'DIAFON-' + randomUUID().replace(/-/g, '');
+      // Bina adi: site varsa "Site - Blok", yoksa blok adi veya site adi
+      let buildingName = dto.siteName || block.blockName || 'Bina';
+      if (dto.siteName && block.blockName) buildingName = `${dto.siteName} ${block.blockName}`;
+      else if (block.blockName) buildingName = block.blockName;
+
+      const building = await this.prisma.building.create({
+        data: {
+          buildingName,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          radiusMeter: 100,
+          qrToken: token,
+          siteName: dto.siteName || null,
+          blockName: block.blockName || null,
+          ownerUserId: userId,
+          requireApproval: true,
+        },
+      });
+
+      // Daireleri uret (1..count)
+      const apartmentData: { buildingId: string; flatNo: string }[] = [];
+      for (let i = 1; i <= count; i++) {
+        apartmentData.push({ buildingId: building.id, flatNo: String(i) });
+      }
+      await this.prisma.apartment.createMany({ data: apartmentData });
+
+      createdBuildings.push({ id: building.id, buildingName, blockName: block.blockName, flatCount: count, qrToken: token });
+    }
+
+    return { success: true, buildings: createdBuildings };
+  }
 }

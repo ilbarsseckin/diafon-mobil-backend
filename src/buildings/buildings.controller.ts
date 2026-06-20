@@ -159,6 +159,18 @@ export class BuildingsController {
     return { success: true };
   }
 
+  // --- YONETICI: yapi kur (site + bloklar + daireler) ---
+  @UseGuards(JwtAuthGuard)
+  @Post('create-structure')
+  async createStructure(@Req() req: any, @Body() body: {
+    siteName?: string;
+    latitude: number;
+    longitude: number;
+    blocks: { blockName?: string; flatCount: number }[];
+  }) {
+    return this.service.createStructure(req.user.userId, body);
+  }
+
   // --- Admin: bina yonetimi ---
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
