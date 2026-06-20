@@ -73,6 +73,7 @@ export class BuildingsService {
     const residents = await this.prisma.resident.findMany({
       where: {
         visible: true,
+        approved: true,
         apartment: { buildingId: b.id },
         user: { blocked: false },
       },
@@ -137,6 +138,9 @@ export class BuildingsService {
     } else {
       // Yeni bina olustur (otomatik QR token ile)
       const newToken = 'DIAFON-' + randomUUID().replace(/-/g, '');
+      // Kurucu premium mi? Premium ise yonetici olur + onay sistemi acilir
+      const creator = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
+      const isPremiumCreator = creator?.isPremium === true;
       const b = await this.prisma.building.create({
         data: {
           buildingName: dto.buildingName,
@@ -145,6 +149,8 @@ export class BuildingsService {
           longitude: dto.longitude,
           radiusMeter: 100,
           qrToken: newToken,
+          ownerUserId: isPremiumCreator ? userId : null,
+          requireApproval: isPremiumCreator,
         },
       });
       buildingId = b.id;
@@ -161,12 +167,18 @@ export class BuildingsService {
     }
 
     // 3. Kullaniciyi bu daireye sakin yap (zaten varsa tekrar ekleme)
+    const bldForApproval = await this.prisma.building.findUnique({ where: { id: buildingId }, select: { requireApproval: true, ownerUserId: true } });
+    // Kurucu/yonetici onaydan muaf; baskasinin yoneticili binasina katilan beklemede
+    const isOwner = bldForApproval?.ownerUserId === userId;
+    const needsApproval = bldForApproval?.requireApproval === true && !isOwner && !joined === false;
+    // Aciklama: yeni bina kuran (joined=false) zaten owner olur -> isOwner true -> needsApproval false
+    const finalNeedsApproval = bldForApproval?.requireApproval === true && !isOwner;
     const existing = await this.prisma.resident.findFirst({
       where: { userId, apartmentId: apartment.id },
     });
     if (!existing) {
       await this.prisma.resident.create({
-        data: { userId, apartmentId: apartment.id, visible: true },
+        data: { userId, apartmentId: apartment.id, visible: true, approved: !finalNeedsApproval },
       });
     }
 
@@ -202,6 +214,7 @@ export class BuildingsService {
     const residents = await this.prisma.resident.findMany({
       where: {
         visible: true,
+        approved: true,
         apartment: { buildingId: building.id },
         user: { blocked: false },
       },
@@ -249,12 +262,13 @@ export class BuildingsService {
     }
 
     // Sakin yap (zaten varsa tekrar ekleme)
+    const needsApprovalQr = building.requireApproval === true;
     const existing = await this.prisma.resident.findFirst({
       where: { userId, apartmentId: apartment.id },
     });
     if (!existing) {
       await this.prisma.resident.create({
-        data: { userId, apartmentId: apartment.id, visible: true },
+        data: { userId, apartmentId: apartment.id, visible: true, approved: !needsApprovalQr },
       });
     }
 

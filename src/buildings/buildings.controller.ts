@@ -90,6 +90,75 @@ export class BuildingsController {
     };
   }
 
+  // --- YONETICI: bekleyen sakinleri listele ---
+  @UseGuards(JwtAuthGuard)
+  @Get('pending-residents')
+  async pendingResidents(@Req() req: any) {
+    // Bu kullanicinin yonetici oldugu binalar
+    const buildings = await this.prisma.building.findMany({
+      where: { ownerUserId: req.user.userId },
+      select: { id: true, buildingName: true, blockName: true },
+    });
+    if (buildings.length === 0) return { isManager: false, pending: [] };
+    const buildingIds = buildings.map(b => b.id);
+    const pending = await this.prisma.resident.findMany({
+      where: { approved: false, apartment: { buildingId: { in: buildingIds } } },
+      include: {
+        user: { select: { id: true, name: true, phone: true, photoUrl: true } },
+        apartment: { select: { flatNo: true, floor: true, buildingId: true } },
+      },
+    });
+    return {
+      isManager: true,
+      buildings,
+      pending: pending.map(p => ({
+        residentId: p.id,
+        userId: p.user.id,
+        name: p.user.name,
+        phone: p.user.phone,
+        photoUrl: p.user.photoUrl,
+        flatNo: p.apartment.flatNo,
+        floor: p.apartment.floor,
+        buildingId: p.apartment.buildingId,
+      })),
+    };
+  }
+
+  // --- YONETICI: sakini onayla ---
+  @UseGuards(JwtAuthGuard)
+  @Post('approve-resident')
+  async approveResident(@Req() req: any, @Body() body: { residentId: string }) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { id: body.residentId },
+      include: { apartment: { select: { buildingId: true } } },
+    });
+    if (!resident) return { success: false, message: 'Sakin bulunamadi' };
+    // Yetki: bu bina bu kullanicinin mi?
+    const building = await this.prisma.building.findUnique({ where: { id: resident.apartment.buildingId } });
+    if (!building || building.ownerUserId !== req.user.userId) {
+      return { success: false, message: 'Yetkiniz yok' };
+    }
+    await this.prisma.resident.update({ where: { id: body.residentId }, data: { approved: true } });
+    return { success: true };
+  }
+
+  // --- YONETICI: sakini reddet/sil ---
+  @UseGuards(JwtAuthGuard)
+  @Post('reject-resident')
+  async rejectResident(@Req() req: any, @Body() body: { residentId: string }) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { id: body.residentId },
+      include: { apartment: { select: { buildingId: true } } },
+    });
+    if (!resident) return { success: false, message: 'Sakin bulunamadi' };
+    const building = await this.prisma.building.findUnique({ where: { id: resident.apartment.buildingId } });
+    if (!building || building.ownerUserId !== req.user.userId) {
+      return { success: false, message: 'Yetkiniz yok' };
+    }
+    await this.prisma.resident.delete({ where: { id: body.residentId } });
+    return { success: true };
+  }
+
   // --- Admin: bina yonetimi ---
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')

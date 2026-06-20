@@ -136,7 +136,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Dairedeki tum sakinler
     const residents = await this.prisma.resident.findMany({
-      where: { apartmentId: data.apartmentId, visible: true, user: { blocked: false } },
+      where: { apartmentId: data.apartmentId, visible: true, approved: true, user: { blocked: false } },
       include: { user: { select: { id: true, name: true } } },
     });
     if (residents.length === 0) {
