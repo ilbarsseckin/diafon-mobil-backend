@@ -55,6 +55,7 @@ model Building {
   blockName    String?  @map("block_name")
   ownerUserId  String?  @map("owner_user_id")
   requireApproval Boolean @default(false) @map("require_approval")
+  imageUrl     String?  @map("image_url")
   createdAt    DateTime @default(now()) @map("created_at")
 
   apartments   Apartment[]
@@ -63,15 +64,40 @@ model Building {
   @@map("buildings")
 }
 
+model SecurityGuard {
+  id          String   @id @default(uuid())
+  ownerUserId String   @map("owner_user_id")
+  phone       String
+  guardName   String?  @map("guard_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+  @@unique([ownerUserId, phone])
+  @@map("security_guards")
+}
+
+model Note {
+  id          String   @id @default(uuid())
+  apartmentId String   @map("apartment_id")
+  fromUserId  String?  @map("from_user_id")
+  fromRole    String   @map("from_role")
+  fromName    String?  @map("from_name")
+  text        String
+  isRead      Boolean  @default(false) @map("is_read")
+  createdAt   DateTime @default(now()) @map("created_at")
+  apartment   Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+  @@map("notes")
+}
+
 model Apartment {
   id         String   @id @default(uuid())
   buildingId String   @map("building_id")
   flatNo     String   @map("flat_no")
   floor      String?
+  listingStatus String @default("none") @map("listing_status")
   createdAt  DateTime @default(now()) @map("created_at")
 
   building   Building   @relation(fields: [buildingId], references: [id], onDelete: Cascade)
   residents  Resident[]
+  notes      Note[]
 
   @@map("apartments")
 }

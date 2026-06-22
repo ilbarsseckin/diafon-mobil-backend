@@ -79,7 +79,7 @@ export class BuildingsService {
       },
       include: {
         user: { select: { id: true, name: true, photoUrl: true, isOnline: true } },
-        apartment: { select: { id: true, flatNo: true, floor: true } },
+        apartment: { select: { id: true, flatNo: true, floor: true, listingStatus: true } },
       },
     });
 
@@ -99,6 +99,7 @@ export class BuildingsService {
         apartmentId: r.apartment.id,
         flatNo: r.apartment.flatNo,
         floor: r.apartment.floor,
+        listingStatus: r.apartment.listingStatus,
       })),
     };
   }
@@ -220,7 +221,7 @@ export class BuildingsService {
       },
       include: {
         user: { select: { id: true, name: true, photoUrl: true, isOnline: true } },
-        apartment: { select: { id: true, flatNo: true, floor: true } },
+        apartment: { select: { id: true, flatNo: true, floor: true, listingStatus: true } },
       },
     });
     // Bu bina bir siteye aitse, kardes bloklari da getir
@@ -255,6 +256,7 @@ export class BuildingsService {
         id: building.id,
         buildingName: building.buildingName,
         address: building.address,
+        imageUrl: building.imageUrl,
       },
       residents: residents.map(r => ({
         userId: r.user.id,
@@ -264,6 +266,7 @@ export class BuildingsService {
         apartmentId: r.apartment.id,
         flatNo: r.apartment.flatNo,
         floor: r.apartment.floor,
+        listingStatus: r.apartment.listingStatus,
       })),
     };
   }

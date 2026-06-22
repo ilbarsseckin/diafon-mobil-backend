@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, Req } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BuildingsService } from './buildings.service';
+import { PushService } from '../calls/push.service';
 import { CreateBuildingDto } from './dto/building.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -8,7 +9,7 @@ import { Roles } from '../auth/guards/roles.decorator';
 
 @Controller('buildings')
 export class BuildingsController {
-  constructor(private service: BuildingsService, private prisma: PrismaService) {}
+  constructor(private service: BuildingsService, private prisma: PrismaService, private push: PushService) {}
 
   // --- Herkese acik: konuma gore bina + sakin listesi ---
   @Get('nearby')
@@ -88,6 +89,411 @@ export class BuildingsController {
       flatNo: resident.apartment.flatNo,
       userId: req.user.userId,
     };
+  }
+
+  // --- YONETICI: tum binalar + daireler + sakinler (yonetim panosu) ---
+  @UseGuards(JwtAuthGuard)
+  @Get('building-overview')
+  async buildingOverview(@Req() req: any) {
+    const buildings = await this.prisma.building.findMany({
+      where: { ownerUserId: req.user.userId },
+      orderBy: [{ siteName: 'asc' }, { blockName: 'asc' }],
+    });
+    if (buildings.length === 0) return { isManager: false, buildings: [] };
+    const buildingIds = buildings.map((b) => b.id);
+    const apartments = await this.prisma.apartment.findMany({
+      where: { buildingId: { in: buildingIds } },
+      include: {
+        residents: {
+          include: {
+            user: { select: { id: true, name: true, phone: true, photoUrl: true } },
+          },
+        },
+      },
+    });
+    const numCmp = (a: string, b: string) => {
+      const na = parseInt(a, 10), nb = parseInt(b, 10);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return a.localeCompare(b);
+    };
+    return {
+      isManager: true,
+      buildings: buildings.map((b) => {
+        const flats = apartments.filter((a) => a.buildingId === b.id);
+        flats.sort((x, y) => numCmp(x.flatNo, y.flatNo));
+        return {
+          id: b.id,
+          buildingName: b.buildingName,
+          siteName: b.siteName,
+          blockName: b.blockName,
+          imageUrl: b.imageUrl,
+          requireApproval: b.requireApproval,
+          flatCount: flats.length,
+          residentCount: flats.reduce((s, a) => s + a.residents.length, 0),
+          flats: flats.map((a) => ({
+            apartmentId: a.id,
+            flatNo: a.flatNo,
+            floor: a.floor,
+            listingStatus: a.listingStatus,
+            residents: a.residents.map((r) => ({
+              residentId: r.id,
+              userId: r.user.id,
+              name: r.user.name,
+              phone: r.user.phone,
+              photoUrl: r.user.photoUrl,
+              approved: r.approved,
+            })),
+          })),
+        };
+      }),
+    };
+  }
+
+  // --- YONETICI: guvenlik gorevlisi ata ---
+  @UseGuards(JwtAuthGuard)
+  @Post('add-security')
+  async addSecurity(@Req() req: any, @Body() body: { phone: string; guardName?: string }) {
+    const owns = await this.prisma.building.findFirst({ where: { ownerUserId: req.user.userId } });
+    if (!owns) return { success: false, message: 'Yonetici degilsiniz' };
+    const phone = (body.phone || '').trim();
+    if (!phone) return { success: false, message: 'Telefon gerekli' };
+    try {
+      await this.prisma.securityGuard.create({
+        data: { ownerUserId: req.user.userId, phone, guardName: body.guardName || null },
+      });
+    } catch (e) {
+      return { success: false, message: 'Bu numara zaten ekli' };
+    }
+    return { success: true };
+  }
+
+  // --- YONETICI: guvenlik listesi ---
+  @UseGuards(JwtAuthGuard)
+  @Get('list-security')
+  async listSecurity(@Req() req: any) {
+    const guards = await this.prisma.securityGuard.findMany({
+      where: { ownerUserId: req.user.userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { guards };
+  }
+
+  // --- YONETICI: guvenlik cikar ---
+  @UseGuards(JwtAuthGuard)
+  @Post('remove-security')
+  async removeSecurity(@Req() req: any, @Body() body: { id: string }) {
+    const g = await this.prisma.securityGuard.findUnique({ where: { id: body.id } });
+    if (!g || g.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    await this.prisma.securityGuard.delete({ where: { id: body.id } });
+    return { success: true };
+  }
+
+  // --- GUVENLIK: kendi sitesinin tum bloklari/daireleri/sakinleri ---
+  @UseGuards(JwtAuthGuard)
+  @Get('security-overview')
+  async securityOverview(@Req() req: any) {
+    const assignments = await this.prisma.securityGuard.findMany({ where: { phone: req.user.phone } });
+    if (assignments.length === 0) return { isSecurity: false, buildings: [] };
+    const ownerIds = [...new Set(assignments.map((a) => a.ownerUserId))];
+    const buildings = await this.prisma.building.findMany({
+      where: { ownerUserId: { in: ownerIds } },
+      orderBy: [{ siteName: 'asc' }, { blockName: 'asc' }],
+    });
+    const buildingIds = buildings.map((b) => b.id);
+    const apartments = await this.prisma.apartment.findMany({
+      where: { buildingId: { in: buildingIds } },
+      include: {
+        residents: {
+          where: { approved: true },
+          include: { user: { select: { id: true, name: true, phone: true, photoUrl: true } } },
+        },
+      },
+    });
+    const numCmp = (a: string, b: string) => {
+      const na = parseInt(a, 10), nb = parseInt(b, 10);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return a.localeCompare(b);
+    };
+    return {
+      isSecurity: true,
+      buildings: buildings.map((b) => {
+        const flats = apartments.filter((a) => a.buildingId === b.id);
+        flats.sort((x, y) => numCmp(x.flatNo, y.flatNo));
+        return {
+          id: b.id, buildingName: b.buildingName, siteName: b.siteName, blockName: b.blockName,
+          flatCount: flats.length,
+          flats: flats.map((a) => ({
+            apartmentId: a.id, flatNo: a.flatNo, listingStatus: a.listingStatus,
+            residents: a.residents.map((r) => ({
+              name: r.user.name, phone: r.user.phone, photoUrl: r.user.photoUrl,
+            })),
+          })),
+        };
+      }),
+    };
+  }
+
+  // --- NOT: daireye not birak (guvenlik veya yonetici) ---
+  @UseGuards(JwtAuthGuard)
+  @Post('add-note')
+  async addNote(@Req() req: any, @Body() body: { apartmentId: string; text: string; fromRole: string }) {
+    const text = (body.text || '').trim();
+    if (!text) return { success: false, message: 'Not bos olamaz' };
+    const apt = await this.prisma.apartment.findUnique({
+      where: { id: body.apartmentId }, include: { building: true },
+    });
+    if (!apt) return { success: false, message: 'Daire bulunamadi' };
+    // Yetki: bina sahibi VEYA bu sitenin guvenligi
+    const ownerId = apt.building.ownerUserId;
+    const isOwner = ownerId === req.user.userId;
+    const isSecurity = ownerId
+      ? await this.prisma.securityGuard.findFirst({
+          where: { phone: req.user.phone, ownerUserId: ownerId },
+        })
+      : null;
+    const isResident = await this.prisma.resident.findFirst({
+      where: { userId: req.user.userId, apartmentId: body.apartmentId, approved: true },
+    });
+    if (!isOwner && !isSecurity && !isResident) return { success: false, message: 'Yetki yok' };
+    const role = isOwner ? 'yonetici' : isSecurity ? 'guvenlik' : 'sakin';
+    const me = await this.prisma.user.findUnique({ where: { id: req.user.userId }, select: { name: true } });
+    await this.prisma.note.create({
+      data: {
+        apartmentId: body.apartmentId,
+        fromUserId: req.user.userId,
+        fromRole: role,
+        fromName: me?.name || null,
+        text,
+      },
+    });
+    // Daire sakinlerine push bildirim (kendisi haric)
+    const roleLabel = role === 'guvenlik' ? 'Guvenlik' : role === 'yonetici' ? 'Yonetici' : 'Sakin';
+    const residents = await this.prisma.resident.findMany({
+      where: { apartmentId: body.apartmentId, approved: true, userId: { not: req.user.userId } },
+      select: { userId: true },
+    });
+    const receiverIds = residents.map((r) => r.userId);
+    if (receiverIds.length > 0) {
+      this.push.sendNoteNotification(receiverIds, roleLabel + ' notu', text).catch(() => {});
+    }
+    return { success: true };
+  }
+
+  // --- NOT: dairenin notlarini gor ---
+  @UseGuards(JwtAuthGuard)
+  @Get('flat-notes')
+  async flatNotes(@Req() req: any, @Query('apartmentId') apartmentId: string) {
+    const notes = await this.prisma.note.findMany({
+      where: { apartmentId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return { notes };
+  }
+
+  // --- SAKIN: kendi dairesinin notlari ---
+  @UseGuards(JwtAuthGuard)
+  @Get('my-notes')
+  async myNotes(@Req() req: any) {
+    const residencies = await this.prisma.resident.findMany({
+      where: { userId: req.user.userId, approved: true },
+      include: { apartment: { include: { building: true } } },
+    });
+    if (residencies.length === 0) return { apartments: [], notes: [], unread: 0 };
+    const apartments = residencies.map((r) => ({
+      apartmentId: r.apartmentId,
+      label: (r.apartment.building.siteName && r.apartment.building.blockName
+        ? r.apartment.building.siteName + ' ' + r.apartment.building.blockName
+        : r.apartment.building.buildingName) + ' - Daire ' + r.apartment.flatNo,
+    }));
+    const aptIds = residencies.map((r) => r.apartmentId);
+    const notes = await this.prisma.note.findMany({
+      where: { apartmentId: { in: aptIds } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    const unread = notes.filter((n) => n.fromRole !== 'sakin' && !n.isRead).length;
+    return { apartments, notes, unread };
+  }
+
+  // --- SAKIN: notlari okundu isaretle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('mark-notes-read')
+  async markNotesRead(@Req() req: any) {
+    const residencies = await this.prisma.resident.findMany({
+      where: { userId: req.user.userId, approved: true },
+    });
+    const aptIds = residencies.map((r) => r.apartmentId);
+    if (aptIds.length === 0) return { success: true };
+    await this.prisma.note.updateMany({
+      where: { apartmentId: { in: aptIds }, fromRole: { not: 'sakin' }, isRead: false },
+      data: { isRead: true },
+    });
+    return { success: true };
+  }
+
+  // --- YONETICI: bloga daire ekle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('add-flat')
+  async addFlat(@Req() req: any, @Body() body: { buildingId: string; flatNo: string; floor?: string }) {
+    const flatNo = (body.flatNo || '').trim();
+    if (!flatNo) return { success: false, message: 'Daire no gerekli' };
+    const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi' };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    const exists = await this.prisma.apartment.findFirst({ where: { buildingId: body.buildingId, flatNo } });
+    if (exists) return { success: false, message: 'Bu daire no zaten var' };
+    await this.prisma.apartment.create({
+      data: { buildingId: body.buildingId, flatNo, floor: body.floor || null },
+    });
+    return { success: true };
+  }
+
+  // --- YONETICI: bos daire sil ---
+  @UseGuards(JwtAuthGuard)
+  @Post('delete-flat')
+  async deleteFlat(@Req() req: any, @Body() body: { apartmentId: string }) {
+    const apt = await this.prisma.apartment.findUnique({
+      where: { id: body.apartmentId },
+      include: { building: true, residents: true },
+    });
+    if (!apt) return { success: false, message: 'Daire bulunamadi' };
+    if (apt.building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    if (apt.residents.length > 0) return { success: false, message: 'Once sakinleri cikarin' };
+    await this.prisma.apartment.delete({ where: { id: body.apartmentId } });
+    return { success: true };
+  }
+
+  // --- YONETICI: siteye blok ekle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('add-block')
+  async addBlock(@Req() req: any, @Body() body: { fromBuildingId: string; blockName: string; flatCount: number }) {
+    const ref = await this.prisma.building.findUnique({ where: { id: body.fromBuildingId } });
+    if (!ref) return { success: false, message: 'Bina bulunamadi' };
+    if (ref.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    const blockName = (body.blockName || '').trim();
+    if (!blockName) return { success: false, message: 'Blok adi gerekli' };
+    const count = Math.max(1, Math.min(500, Number(body.flatCount) || 0));
+    if (count < 1) return { success: false, message: 'Daire sayisi gecersiz' };
+    // Ayni siteName altinda ayni blockName var mi?
+    if (ref.siteName) {
+      const dup = await this.prisma.building.findFirst({
+        where: { siteName: ref.siteName, blockName, ownerUserId: req.user.userId },
+      });
+      if (dup) return { success: false, message: 'Bu blok zaten var' };
+    }
+    const qr = 'DIAFON-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const newBuilding = await this.prisma.building.create({
+      data: {
+        buildingName: (ref.siteName || ref.buildingName) + ' ' + blockName,
+        latitude: ref.latitude, longitude: ref.longitude, radiusMeter: ref.radiusMeter,
+        siteName: ref.siteName, blockName, ownerUserId: req.user.userId,
+        requireApproval: ref.requireApproval, qrToken: qr,
+      },
+    });
+    const data: { buildingId: string; flatNo: string }[] = [];
+    for (let i = 1; i <= count; i++) data.push({ buildingId: newBuilding.id, flatNo: String(i) });
+    await this.prisma.apartment.createMany({ data });
+    return { success: true, buildingId: newBuilding.id };
+  }
+
+  // --- YONETICI: binalarindaki cagri gecmisi (receiver->daire->bina zinciri) ---
+  @UseGuards(JwtAuthGuard)
+  @Get('call-logs')
+  async callLogs(@Req() req: any) {
+    const buildings = await this.prisma.building.findMany({
+      where: { ownerUserId: req.user.userId },
+      select: { id: true, buildingName: true, siteName: true, blockName: true },
+    });
+    if (buildings.length === 0) return { isManager: false, calls: [] };
+    const buildingIds = buildings.map((b) => b.id);
+    const bMap = new Map(buildings.map((b) => [b.id, b]));
+    // Bu binalardaki dairelerin sakinleri (receiver adaylari)
+    const residents = await this.prisma.resident.findMany({
+      where: { apartment: { buildingId: { in: buildingIds } } },
+      select: { userId: true, apartment: { select: { buildingId: true, flatNo: true } } },
+    });
+    if (residents.length === 0) return { isManager: true, calls: [] };
+    const userToBuilding = new Map<string, { buildingId: string; flatNo: string }>();
+    residents.forEach((r) => {
+      userToBuilding.set(r.userId, { buildingId: r.apartment.buildingId, flatNo: r.apartment.flatNo });
+    });
+    const receiverIds = [...userToBuilding.keys()];
+    const calls = await this.prisma.call.findMany({
+      where: { receiverUserId: { in: receiverIds } },
+      orderBy: { startedAt: 'desc' },
+      take: 100,
+      include: {
+        caller: { select: { name: true, phone: true } },
+        receiver: { select: { name: true, phone: true } },
+      },
+    });
+    return {
+      isManager: true,
+      calls: calls.map((c) => {
+        const info = userToBuilding.get(c.receiverUserId);
+        const b = info ? bMap.get(info.buildingId) : null;
+        const label = b
+          ? (b.siteName && b.blockName ? b.siteName + ' ' + b.blockName : b.buildingName)
+          : null;
+        return {
+          id: c.id,
+          callerName: c.caller?.name || null,
+          callerPhone: c.caller?.phone || null,
+          receiverName: c.receiver?.name || null,
+          receiverPhone: c.receiver?.phone || null,
+          buildingLabel: label,
+          flatNo: info?.flatNo || null,
+          startedAt: c.startedAt,
+          duration: c.duration,
+          status: c.status,
+        };
+      }),
+    };
+  }
+
+  // --- YONETICI: bina resmi yukle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('set-building-image')
+  async setBuildingImage(@Req() req: any, @Body() body: { buildingId: string; photo: string }) {
+    const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi' };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    const fs = require('fs');
+    const path = require('path');
+    const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const clean = body.photo.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(clean, 'base64');
+    const filename = `building_${body.buildingId}_${Date.now()}.jpg`;
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    const url = `/uploads/${filename}`;
+    await this.prisma.building.update({ where: { id: body.buildingId }, data: { imageUrl: url } });
+    return { success: true, url };
+  }
+
+  // --- YONETICI: daire satilik/kiralik durumu degistir ---
+  @UseGuards(JwtAuthGuard)
+  @Post('set-listing')
+  async setListing(@Req() req: any, @Body() body: { apartmentId: string; status: string }) {
+    const allowed = ['none', 'sale', 'rent'];
+    if (!allowed.includes(body.status)) {
+      return { success: false, message: 'Gecersiz durum' };
+    }
+    // Daireyi bul + bina sahibi mi kontrol et
+    const apartment = await this.prisma.apartment.findUnique({
+      where: { id: body.apartmentId },
+      include: { building: true },
+    });
+    if (!apartment) return { success: false, message: 'Daire bulunamadi' };
+    if (apartment.building.ownerUserId !== req.user.userId) {
+      return { success: false, message: 'Bu daire icin yetkiniz yok' };
+    }
+    await this.prisma.apartment.update({
+      where: { id: body.apartmentId },
+      data: { listingStatus: body.status },
+    });
+    return { success: true, status: body.status };
   }
 
   // --- YONETICI: bekleyen sakinleri listele ---

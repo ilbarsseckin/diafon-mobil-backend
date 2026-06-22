@@ -60,4 +60,27 @@ export class PushService {
       this.logger.error('Push gonderilemedi: ' + e.message);
     }
   }
+
+  // Not bildirimi - GORUNUR notification (kargonuz geldi vb.)
+  async sendNoteNotification(receiverUserIds: string[], title: string, body: string) {
+    if (!this.initialized) return;
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: receiverUserIds }, fcmToken: { not: null } },
+      select: { fcmToken: true },
+    });
+    for (const u of users) {
+      if (!u.fcmToken) continue;
+      try {
+        await admin.messaging().send({
+          token: u.fcmToken,
+          notification: { title, body },
+          data: { type: 'note' },
+          android: { priority: 'high', notification: { sound: 'default' } },
+        });
+      } catch (e) {
+        this.logger.error('Not push gonderilemedi: ' + e.message);
+      }
+    }
+    this.logger.log(`Not push gonderildi: ${users.length} kullanici`);
+  }
 }
