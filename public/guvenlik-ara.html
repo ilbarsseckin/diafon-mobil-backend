@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Güvenlik - Ara</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; background: #111; color: #fff; height: 100vh; overflow: hidden; }
+    #callScreen { position: fixed; inset: 0; background: #111; display: flex; flex-direction: column; }
+    #remoteVideo { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; background: #222; }
+    #localVideo { position: absolute; top: 16px; right: 16px; width: 100px; height: 140px; object-fit: cover; border-radius: 12px; border: 2px solid white; z-index: 2; background: #333; }
+    .call-info { position: absolute; top: 20px; left: 0; right: 0; text-align: center; color: white; z-index: 2; }
+    .call-info .peer-name { font-size: 22px; font-weight: bold; }
+    .call-info .status { font-size: 14px; margin-top: 6px; opacity: 0.85; }
+    .call-controls { position: absolute; bottom: 40px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; z-index: 2; }
+    .call-controls button { width: 64px; height: 64px; border-radius: 50%; border: none; font-size: 26px; cursor: pointer; color: white; }
+    .btn-end { background: #E63946; }
+    .btn-mute { background: rgba(255,255,255,0.2); }
+    .tag { position: absolute; top: 70px; left: 0; right: 0; text-align: center; z-index: 2; }
+    .tag span { background: #1a5fc2; padding: 4px 14px; border-radius: 14px; font-size: 13px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div id="callScreen">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div class="call-info">
+      <div class="peer-name" id="peerName">Daire</div>
+      <div class="status" id="callStatus">Hazırlanıyor...</div>
+    </div>
+    <div class="tag"><span>🛡️ Güvenlik araması</span></div>
+    <div class="call-controls">
+      <button class="btn-mute" id="muteBtn" onclick="toggleMute()">🎤</button>
+      <button class="btn-end" onclick="endCall()">📞</button>
+    </div>
+  </div>
+
+  <script>
+    const API = 'https://mobildiafon.com/api';
+    const SOCKET_URL = 'https://mobildiafon.com';
+    const params = new URLSearchParams(window.location.search);
+    const secToken = params.get('token');        // güvenliğin JWT token'ı
+    const apartmentId = params.get('apartmentId');
+    const flatLabel = params.get('flat') || 'Daire';
+
+    let socket = null, pc = null, localStream = null;
+    let callId = null, currentPeerId = null, micOn = true;
+
+    const iceConfig = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'turn:128.140.127.151:3478', username: 'diafonturn', credential: 'turnpass2026' }
+      ]
+    };
+
+    async function startCall() {
+      if (!secToken || !apartmentId) {
+        document.getElementById('callStatus').textContent = 'Geçersiz bağlantı';
+        return;
+      }
+      document.getElementById('peerName').textContent = flatLabel;
+      document.getElementById('callStatus').textContent = 'Bağlanıyor...';
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } });
+        document.getElementById('localVideo').srcObject = localStream;
+        pc = new RTCPeerConnection(iceConfig);
+        localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        pc.ontrack = (e) => {
+          document.getElementById('remoteVideo').srcObject = e.streams[0];
+          document.getElementById('callStatus').textContent = 'Görüşülüyor';
+        };
+        pc.onicecandidate = (e) => {
+          if (e.candidate && callId && currentPeerId) {
+            socket.emit('webrtc:ice', { toUserId: currentPeerId, callId, candidate: e.candidate.toJSON() });
+          }
+        };
+        // Güvenlik KENDİ token'ı ile bağlanır (guest değil)
+        socket = io(SOCKET_URL, { transports: ['websocket'], auth: { token: secToken } });
+        socket.on('call:ringing', (d) => { callId = d.callId; document.getElementById('callStatus').textContent = flatLabel + ' çalınıyor...'; });
+        socket.on('call:accepted', async (d) => {
+          callId = d.callId;
+          currentPeerId = d.accepterId || currentPeerId;
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('webrtc:offer', { toUserId: currentPeerId, callId, sdp: { sdp: offer.sdp, type: offer.type } });
+        });
+        socket.on('webrtc:answer', async (d) => { await pc.setRemoteDescription(new RTCSessionDescription(d.sdp)); });
+        socket.on('webrtc:ice', async (d) => { try { await pc.addIceCandidate(new RTCIceCandidate(d.candidate)); } catch(e){} });
+        socket.on('call:rejected', () => { document.getElementById('callStatus').textContent = 'Reddedildi'; setTimeout(endCall, 1500); });
+        socket.on('call:ended', () => endCall());
+        socket.on('call:unavailable', (d) => { document.getElementById('callStatus').textContent = (d && d.reason) ? d.reason : 'Cevap verilmedi'; setTimeout(endCall, 2500); });
+        socket.on('connect', () => {
+          socket.emit('call:start-flat', { apartmentId });
+        });
+      } catch (e) {
+        document.getElementById('callStatus').textContent = 'Hata: ' + e.message;
+        setTimeout(endCall, 2500);
+      }
+    }
+
+    function toggleMute() {
+      if (!localStream) return;
+      micOn = !micOn;
+      localStream.getAudioTracks().forEach(t => t.enabled = micOn);
+      document.getElementById('muteBtn').style.opacity = micOn ? '1' : '0.4';
+    }
+
+    function endCall() {
+      if (callId && socket) socket.emit('call:end', { callId });
+      if (pc) { pc.close(); pc = null; }
+      if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+      if (socket) { socket.disconnect(); socket = null; }
+      callId = null; currentPeerId = null;
+      // Pencereyi kapat (panelden açıldıysa)
+      window.close();
+      document.getElementById('callStatus').textContent = 'Görüşme bitti';
+    }
+
+    // Sayfa açılır açılmaz aramayı başlat
+    startCall();
+  </script>
+</body>
+</html>
