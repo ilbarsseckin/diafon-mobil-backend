@@ -56,8 +56,6 @@ model Building {
   ownerUserId  String?  @map("owner_user_id")
   requireApproval Boolean @default(false) @map("require_approval")
   imageUrl     String?  @map("image_url")
-  locationCheckEnabled Boolean @default(false) @map("location_check_enabled")
-  locationCheckRadius  Int     @default(150) @map("location_check_radius")
   createdAt    DateTime @default(now()) @map("created_at")
 
   apartments   Apartment[]

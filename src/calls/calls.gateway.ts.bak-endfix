@@ -337,27 +337,12 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Daire (grup) cagrisi - flatcall: iki tarafa da bitti bildir
     if (data.callId.startsWith('flatcall_')) {
       const g = this.guestCalls.get(data.callId);
-      const flat = this.flatCallTargets.get(data.callId);
       if (g) {
         this.server.to(g.callerSocketId).emit('call:ended', { callId: data.callId });
-      }
-      // TUM alicilara bitti + CallKit kapat (henuz cevaplamamis olanlar dahil)
-      if (flat) {
-        for (const uid of flat.receiverIds) {
-          const sid = await this.presence.getSocketId(uid);
-          if (sid) {
-            this.server.to(sid).emit('call:ended', { callId: data.callId });
-            this.server.to(sid).emit('call:taken', { callId: data.callId });
-          }
-        }
-      } else if (g) {
         const rsid = await this.presence.getSocketId(g.receiverUserId);
-        if (rsid) {
-          this.server.to(rsid).emit('call:ended', { callId: data.callId });
-          this.server.to(rsid).emit('call:taken', { callId: data.callId });
-        }
+        if (rsid) this.server.to(rsid).emit('call:ended', { callId: data.callId });
+        this.guestCalls.delete(data.callId);
       }
-      this.guestCalls.delete(data.callId);
       this.flatCallTargets.delete(data.callId);
       return;
     }
