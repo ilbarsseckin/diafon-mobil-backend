@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  GUEST      // misafir/ziyaretçi
+  RESIDENT   // ev sahibi
+  ADMIN      // yönetici
+}
+
+enum CallStatus {
+  RINGING    // çalıyor
+  ACCEPTED   // kabul edildi
+  REJECTED   // reddedildi
+  MISSED     // kaçırıldı
+  ENDED      // tamamlandı
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String
+  phone         String    @unique
+  email         String?
+  role          UserRole  @default(GUEST)
+  photoUrl      String?   @map("photo_url")
+  phoneVerified Boolean   @default(false) @map("phone_verified")
+  fcmToken      String?   @map("fcm_token")      // push notification için
+  voipToken     String?   @map("voip_token")     // iOS CallKit için
+  isOnline      Boolean   @default(false) @map("is_online")
+  blocked       Boolean   @default(false)
+  isPremium     Boolean   @default(false) @map("is_premium")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  residencies   Resident[]
+  callsMade     Call[]    @relation("CallsMade")
+  callsReceived Call[]    @relation("CallsReceived")
+
+  @@map("users")
+}
+
+model Building {
+  id           String   @id @default(uuid())
+  buildingName String   @map("building_name")
+  address      String?
+  latitude     Float
+  longitude    Float
+  radiusMeter  Int      @default(30) @map("radius_meter")
+  qrToken      String?  @unique @map("qr_token")
+  siteName     String?  @map("site_name")
+  blockName    String?  @map("block_name")
+  ownerUserId  String?  @map("owner_user_id")
+  requireApproval Boolean @default(false) @map("require_approval")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  apartments   Apartment[]
+  calls        Call[]
+
+  @@map("buildings")
+}
+
+model Apartment {
+  id         String   @id @default(uuid())
+  buildingId String   @map("building_id")
+  flatNo     String   @map("flat_no")
+  floor      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  building   Building   @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  residents  Resident[]
+
+  @@map("apartments")
+}
+
+model Resident {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  apartmentId String   @map("apartment_id")
+  visible     Boolean  @default(true)   // rahatsız etme modu = false
+  approved    Boolean  @default(true)   // yonetici onayi (yoneticili binada false baslar)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apartment   Apartment @relation(fields: [apartmentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, apartmentId])
+  @@map("residents")
+}
+
+model Call {
+  id             String     @id @default(uuid())
+  callerUserId   String     @map("caller_user_id")
+  receiverUserId String     @map("receiver_user_id")
+  buildingId     String?    @map("building_id")
+  startedAt      DateTime   @default(now()) @map("started_at")
+  endedAt        DateTime?  @map("ended_at")
+  duration       Int?       // saniye
+  callerPhotoUrl String?    @map("caller_photo_url")
+  status         CallStatus @default(RINGING)
+
+  caller         User       @relation("CallsMade", fields: [callerUserId], references: [id])
+  receiver       User       @relation("CallsReceived", fields: [receiverUserId], references: [id])
+  building       Building?  @relation(fields: [buildingId], references: [id])
+
+  @@map("calls")
+}
