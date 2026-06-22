@@ -192,59 +192,6 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }, 30000);
   }
 
-  @SubscribeMessage('call:start-security')
-  async onCallStartSecurity(@ConnectedSocket() client: Socket, @MessageBody() data: { apartmentId?: string }) {
-    const callerUserId = client.data.userId;
-    if (!callerUserId) { client.emit('call:unavailable', { reason: 'Yetkisiz' }); return; }
-    // Sakinin binasini bul: apartmentId verildiyse ondan, yoksa sakinin ilk dairesinden
-    let apt = null;
-    if (data?.apartmentId) {
-      apt = await this.prisma.apartment.findUnique({ where: { id: data.apartmentId }, include: { building: true } });
-    } else {
-      const res = await this.prisma.resident.findFirst({
-        where: { userId: callerUserId, approved: true },
-        include: { apartment: { include: { building: true } } },
-      });
-      apt = res?.apartment || null;
-    }
-    if (!apt || !apt.building || !apt.building.ownerUserId) {
-      client.emit('call:unavailable', { reason: 'Guvenlik bulunamadi' });
-      return;
-    }
-    // O binanin sahibinin guvenlikleri
-    const guards = await this.prisma.securityGuard.findMany({ where: { ownerUserId: apt.building.ownerUserId } });
-    if (guards.length === 0) { client.emit('call:unavailable', { reason: 'Guvenlik atanmamis' }); return; }
-    // Guvenlik telefonlarindan kullanicilari bul
-    const phones = guards.map(g => g.phone);
-    const guardUsers = await this.prisma.user.findMany({ where: { phone: { in: phones }, blocked: false }, select: { id: true, name: true } });
-    if (guardUsers.length === 0) { client.emit('call:unavailable', { reason: 'Guvenlik kullanicisi yok' }); return; }
-    const callId = 'flatcall_' + Math.random().toString(36).substring(2, 14);
-    const me = await this.prisma.user.findUnique({ where: { id: callerUserId }, select: { id: true, name: true, photoUrl: true } });
-    const caller = { id: callerUserId, name: (me?.name || 'Sakin') + ' (Daire ' + (apt.flatNo || '-') + ')', photoUrl: me?.photoUrl || null };
-    this.guestCalls.set(callId, { callerSocketId: client.id, callerUserId, receiverUserId: guardUsers[0].id });
-    const receiverIds = guardUsers.map(u => u.id);
-    this.flatCallTargets.set(callId, { receiverIds, answered: false });
-    for (const gu of guardUsers) {
-      const sid = await this.presence.getSocketId(gu.id);
-      if (sid) this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: caller.photoUrl || '' });
-      await this.push.sendIncomingCall(gu.id, caller.name, callId, callerUserId, caller.photoUrl || undefined);
-    }
-    client.emit('call:ringing', { callId });
-    this.logger.log(`Guvenlik cagrisi: ${callerUserId} -> ${receiverIds.length} guvenlik (call=${callId})`);
-    const callerSocketIdForTimeout = client.id;
-    setTimeout(() => {
-      const flat = this.flatCallTargets.get(callId);
-      if (flat && !flat.answered) {
-        this.server.to(callerSocketIdForTimeout).emit('call:unavailable', { callId, reason: 'Guvenlik cevap vermedi' });
-        for (const uid of flat.receiverIds) {
-          this.presence.getSocketId(uid).then(sid => { if (sid) this.server.to(sid).emit('call:taken', { callId }); });
-        }
-        this.flatCallTargets.delete(callId);
-        this.guestCalls.delete(callId);
-      }
-    }, 30000);
-  }
-
   @SubscribeMessage('call:accept')
   async onCallAccept(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
     // Daire (grup) cagrisi: ilk acan kazanir, digerlerini sustur
