@@ -58,9 +58,6 @@ model Building {
   imageUrl     String?  @map("image_url")
   locationCheckEnabled Boolean @default(false) @map("location_check_enabled")
   locationCheckRadius  Int     @default(150) @map("location_check_radius")
-  doorAdapter  String?  @map("door_adapter")
-  doorDeviceId String?  @map("door_device_id")
-  doorEnabled  Boolean  @default(false) @map("door_enabled")
   createdAt    DateTime @default(now()) @map("created_at")
 
   apartments   Apartment[]
@@ -138,17 +135,4 @@ model Call {
   building       Building?  @relation(fields: [buildingId], references: [id])
 
   @@map("calls")
-}
-
-model DoorLog {
-  id         String   @id @default(uuid())
-  userId     String   @map("user_id")
-  buildingId String   @map("building_id")
-  callId     String?  @map("call_id")
-  success    Boolean  @default(false)
-  error      String?
-  ip         String?
-  createdAt  DateTime @default(now()) @map("created_at")
-  @@index([buildingId])
-  @@map("door_logs")
 }
