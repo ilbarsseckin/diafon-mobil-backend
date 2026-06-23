@@ -145,10 +145,24 @@ model DoorLog {
   userId     String   @map("user_id")
   buildingId String   @map("building_id")
   callId     String?  @map("call_id")
+  doorId     String?  @map("door_id")
   success    Boolean  @default(false)
   error      String?
   ip         String?
   createdAt  DateTime @default(now()) @map("created_at")
   @@index([buildingId])
   @@map("door_logs")
+}
+
+model Door {
+  id         String   @id @default(uuid())
+  buildingId String   @map("building_id")
+  name       String
+  adapter    String   @default("tuya")
+  deviceId   String   @map("device_id")
+  enabled    Boolean  @default(true)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  @@index([buildingId])
+  @@map("doors")
 }
