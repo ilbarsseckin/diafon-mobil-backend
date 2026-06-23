@@ -131,6 +131,7 @@ export class BuildingsController {
         .map((sa) => ({
           apartmentId: sa.id,
           flatNo: sa.flatNo,
+          buildingId: sa.building.id,
           blockName: sa.building.blockName,
           buildingName: sa.building.buildingName,
           residents: sa.residents.map((r) => ({ userId: r.user.id, name: r.user.name, photoUrl: r.user.photoUrl, isOnline: r.user.isOnline })),

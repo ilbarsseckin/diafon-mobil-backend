@@ -186,6 +186,9 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
+    // Dairenin binasi (kapi acma icin call:incoming'e eklenir)
+    const flatApt = await this.prisma.apartment.findUnique({ where: { id: data.apartmentId }, select: { buildingId: true } });
+    const flatBuildingId = flatApt?.buildingId || null;
     // Tek bir callId (grup cagrisi)
     const callId = 'flatcall_' + Math.random().toString(36).substring(2, 14);
 
@@ -208,7 +211,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (const r of residents) {
       const sid = await this.presence.getSocketId(r.user.id);
       if (sid) {
-        this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: '' });
+        this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: '', buildingId: flatBuildingId });
       }
       await this.push.sendIncomingCall(r.user.id, caller?.name || 'Ziyaretçi', callId, callerUserId, undefined);
     }
