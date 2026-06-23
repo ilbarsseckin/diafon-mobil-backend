@@ -91,43 +91,6 @@ export class BuildingsController {
     };
   }
 
-  // --- Kullanicinin TUM evleri (coklu ev) + her evin diger sakinleri ---
-  @UseGuards(JwtAuthGuard)
-  @Get('my-homes')
-  async myHomes(@Req() req: any) {
-    const myResidents = await this.prisma.resident.findMany({
-      where: { userId: req.user.userId, approved: true },
-      include: { apartment: { include: { building: true } } },
-    });
-    if (myResidents.length === 0) return { homes: [] };
-    const homes: any[] = [];
-    for (const mr of myResidents) {
-      const apt = mr.apartment;
-      // Bu dairedeki DIGER sakinler (kendisi haric, gorunur+onayli)
-      const others = await this.prisma.resident.findMany({
-        where: { apartmentId: apt.id, approved: true, visible: true, userId: { not: req.user.userId }, user: { blocked: false } },
-        include: { user: { select: { id: true, name: true, photoUrl: true, isOnline: true } } },
-      });
-      homes.push({
-        apartmentId: apt.id,
-        flatNo: apt.flatNo,
-        floor: apt.floor,
-        buildingId: apt.building.id,
-        buildingName: apt.building.buildingName,
-        siteName: apt.building.siteName,
-        blockName: apt.building.blockName,
-        imageUrl: apt.building.imageUrl,
-        residents: others.map((o) => ({
-          userId: o.user.id,
-          name: o.user.name,
-          photoUrl: o.user.photoUrl,
-          isOnline: o.user.isOnline,
-        })),
-      });
-    }
-    return { homes };
-  }
-
   // --- YONETICI: tum binalar + daireler + sakinler (yonetim panosu) ---
   @UseGuards(JwtAuthGuard)
   @Get('building-overview')
