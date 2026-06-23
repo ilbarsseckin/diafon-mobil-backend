@@ -108,33 +108,6 @@ export class BuildingsController {
         where: { apartmentId: apt.id, approved: true, visible: true, userId: { not: req.user.userId }, user: { blocked: false } },
         include: { user: { select: { id: true, name: true, photoUrl: true, isOnline: true } } },
       });
-      // Site/bina kapsami: ayni siteName+owner (site) ise tum bloklar, degilse o bina
-      const bld = apt.building;
-      const scopeBuildings = bld.siteName
-        ? await this.prisma.building.findMany({ where: { siteName: bld.siteName, ownerUserId: bld.ownerUserId } })
-        : [bld];
-      const scopeIds = scopeBuildings.map((sb) => sb.id);
-      const scopeApts = await this.prisma.apartment.findMany({
-        where: { buildingId: { in: scopeIds } },
-        include: {
-          building: { select: { id: true, buildingName: true, blockName: true } },
-          residents: {
-            where: { approved: true, visible: true, user: { blocked: false } },
-            include: { user: { select: { id: true, name: true, photoUrl: true, isOnline: true } } },
-          },
-        },
-      });
-      const numCmp2 = (a: string, b: string) => { const na = parseInt(a,10), nb = parseInt(b,10); if(!isNaN(na)&&!isNaN(nb)) return na-nb; return a.localeCompare(b); };
-      const siteFlats = scopeApts
-        .filter((sa) => sa.residents.length > 0 && sa.id !== apt.id)
-        .sort((x, y) => numCmp2(x.flatNo, y.flatNo))
-        .map((sa) => ({
-          apartmentId: sa.id,
-          flatNo: sa.flatNo,
-          blockName: sa.building.blockName,
-          buildingName: sa.building.buildingName,
-          residents: sa.residents.map((r) => ({ userId: r.user.id, name: r.user.name, photoUrl: r.user.photoUrl, isOnline: r.user.isOnline })),
-        }));
       homes.push({
         apartmentId: apt.id,
         flatNo: apt.flatNo,
@@ -150,7 +123,6 @@ export class BuildingsController {
           photoUrl: o.user.photoUrl,
           isOnline: o.user.isOnline,
         })),
-        siteFlats,
       });
     }
     return { homes };
