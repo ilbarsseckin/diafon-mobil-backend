@@ -166,3 +166,19 @@ model Door {
   @@index([buildingId])
   @@map("doors")
 }
+
+model Subscription {
+  id               String    @id @default(uuid())
+  ownerUserId      String    @map("owner_user_id")
+  scopeType        String    @default("site") @map("scope_type")
+  scopeName        String    @map("scope_name")
+  status           String    @default("trial")
+  plan             String?
+  flatCount        Int       @default(0) @map("flat_count")
+  monthlyPrice     Int       @default(0) @map("monthly_price")
+  trialEndsAt      DateTime? @map("trial_ends_at")
+  currentPeriodEnd DateTime? @map("current_period_end")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  @@index([ownerUserId])
+  @@map("subscriptions")
+}

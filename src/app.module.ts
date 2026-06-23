@@ -7,6 +7,7 @@ import { BuildingsModule } from './buildings/buildings.module';
 import { ApartmentsModule } from './apartments/apartments.module';
 import { CallsModule } from './calls/calls.module';
 import { DoorModule } from './door/door.module';
+import { SubscriptionModule } from './subscription/subscription.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { DoorModule } from './door/door.module';
     ApartmentsModule,
     CallsModule,
     DoorModule,
+    SubscriptionModule,
   ],
   controllers: [HealthController],
   providers: [],
