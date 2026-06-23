@@ -12,6 +12,51 @@ function pricePerFlat(count: number): number {
 export class SuperadminService {
   constructor(private prisma: PrismaService) {}
 
+  // Genel bakis: KPI + grafik verileri
+  async overview() {
+    const { customers } = await this.customers();
+    const active = customers.filter((c: any) => c.status === 'active');
+    const mrr = active.reduce((s: number, c: any) => s + c.mrr, 0);
+
+    // Son 12 ay yeni kayit (signups) - User.createdAt'tan
+    const now = new Date();
+    const months: string[] = [];
+    const signups: number[] = [];
+    const revenue: number[] = [];
+    const allUsers = await this.prisma.user.findMany({ select: { createdAt: true } });
+    const monthNames = ['Oca','Sub','Mar','Nis','May','Haz','Tem','Agu','Eyl','Eki','Kas','Ara'];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const next = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      months.push(monthNames[d.getMonth()]);
+      signups.push(allUsers.filter(u => u.createdAt >= d && u.createdAt < next).length);
+      // Gelir: basit - su anki MRR'i son aya koy, oncekiler kademeli (gercek gecmis yok)
+      revenue.push(i === 0 ? mrr / 1000 : 0);
+    }
+
+    // Plan dagilimi (scopeType bazli: site/bireysel) - subscription'lardan
+    const subs = await this.prisma.subscription.findMany();
+    const siteCount = subs.filter(s => s.scopeType === 'site').length;
+    const indCount = subs.filter(s => s.scopeType === 'individual').length;
+
+    return {
+      kpi: {
+        total: customers.length,
+        active: active.length,
+        trial: customers.filter((c: any) => c.status === 'trial').length,
+        cancelled: customers.filter((c: any) => c.status === 'cancelled').length,
+        mrr,
+        buildings: customers.reduce((s: number, c: any) => s + c.buildings, 0),
+        flats: customers.reduce((s: number, c: any) => s + c.flats, 0),
+        calls: customers.reduce((s: number, c: any) => s + c.calls, 0),
+      },
+      months,
+      signups,
+      revenue,
+      plans: { site: siteCount, individual: indCount },
+    };
+  }
+
   // Tum musteriler (yoneticiler) + metrikleri
   async customers() {
     // Bina sahibi olan tum kullanicilar = musteriler

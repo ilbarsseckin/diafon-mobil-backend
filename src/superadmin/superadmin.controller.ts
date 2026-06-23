@@ -27,4 +27,12 @@ export class SuperadminController {
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
     return this.service.customers();
   }
+
+  @Get('overview')
+  async overview(@Headers('authorization') auth: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.service.overview();
+  }
 }
