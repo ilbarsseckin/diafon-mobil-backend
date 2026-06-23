@@ -8,6 +8,7 @@ import { ApartmentsModule } from './apartments/apartments.module';
 import { CallsModule } from './calls/calls.module';
 import { DoorModule } from './door/door.module';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { SuperadminModule } from './superadmin/superadmin.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
     CallsModule,
     DoorModule,
     SubscriptionModule,
+    SuperadminModule,
   ],
   controllers: [HealthController],
   providers: [],
