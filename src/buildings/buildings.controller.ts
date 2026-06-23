@@ -556,6 +556,50 @@ export class BuildingsController {
     return { success: true, enabled: !!body.enabled, radius: r };
   }
 
+  // --- YONETICI: bina kapilari listele (yonetim) ---
+  @UseGuards(JwtAuthGuard)
+  @Get('manage-doors/:buildingId')
+  async manageDoors(@Req() req: any, @Param('buildingId') buildingId: string) {
+    const building = await this.prisma.building.findUnique({ where: { id: buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi', doors: [] };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok', doors: [] };
+    const doors = await this.prisma.door.findMany({ where: { buildingId }, orderBy: { sortOrder: 'asc' } });
+    return { success: true, doors };
+  }
+
+  // --- YONETICI: kapi ekle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('add-door')
+  async addDoor(@Req() req: any, @Body() body: { buildingId: string; name: string; deviceId: string; adapter?: string }) {
+    const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi' };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    if (!body.name?.trim() || !body.deviceId?.trim()) return { success: false, message: 'Isim ve cihaz ID gerekli' };
+    const count = await this.prisma.door.count({ where: { buildingId: body.buildingId } });
+    const door = await this.prisma.door.create({
+      data: {
+        buildingId: body.buildingId,
+        name: body.name.trim(),
+        deviceId: body.deviceId.trim(),
+        adapter: body.adapter || 'tuya',
+        sortOrder: count,
+      },
+    });
+    return { success: true, door };
+  }
+
+  // --- YONETICI: kapi sil ---
+  @UseGuards(JwtAuthGuard)
+  @Post('delete-door')
+  async deleteDoor(@Req() req: any, @Body() body: { doorId: string }) {
+    const door = await this.prisma.door.findUnique({ where: { id: body.doorId } });
+    if (!door) return { success: false, message: 'Kapi bulunamadi' };
+    const building = await this.prisma.building.findUnique({ where: { id: door.buildingId } });
+    if (!building || building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    await this.prisma.door.delete({ where: { id: body.doorId } });
+    return { success: true };
+  }
+
   // --- YONETICI: daire satilik/kiralik durumu degistir ---
   @UseGuards(JwtAuthGuard)
   @Post('set-listing')
