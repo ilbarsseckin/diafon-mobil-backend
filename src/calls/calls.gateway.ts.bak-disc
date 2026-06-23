@@ -52,25 +52,6 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // --- Kopma: offline isaretle ---
   async handleDisconnect(client: Socket) {
-    // Bu socket'in ACAYAN oldugu devam eden flatcall aramalari varsa, alicilara bitti+CallKit kapat
-    for (const [callId, g] of this.guestCalls.entries()) {
-      if (g.callerSocketId === client.id) {
-        this.logger.log(`DISCONNECT temizlik: callId=${callId} alicilar=${this.flatCallTargets.get(callId)?.receiverIds?.length || 0}`);
-        const flat = this.flatCallTargets.get(callId);
-        if (flat && !flat.answered) {
-          for (const uid of flat.receiverIds) {
-            const sid = await this.presence.getSocketId(uid);
-            if (sid) {
-              this.server.to(sid).emit('call:ended', { callId });
-              this.server.to(sid).emit('call:taken', { callId });
-            }
-            await this.push.sendCallCancelled(uid, callId);
-          }
-        }
-        this.guestCalls.delete(callId);
-        this.flatCallTargets.delete(callId);
-      }
-    }
     const userId = await this.presence.setOffline(client.id);
     if (userId) {
       await this.prisma.user.update({ where: { id: userId }, data: { isOnline: false } }).catch(() => {});
@@ -368,7 +349,6 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.server.to(sid).emit('call:ended', { callId: data.callId });
             this.server.to(sid).emit('call:taken', { callId: data.callId });
           }
-          await this.push.sendCallCancelled(uid, data.callId);
         }
       } else if (g) {
         const rsid = await this.presence.getSocketId(g.receiverUserId);

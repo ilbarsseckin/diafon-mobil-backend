@@ -83,4 +83,21 @@ export class PushService {
     }
     this.logger.log(`Not push gonderildi: ${users.length} kullanici`);
   }
+
+  // Cagri iptal - CallKit kapatma push'u (data-only)
+  async sendCallCancelled(receiverUserId: string, callId: string) {
+    if (!this.initialized) return;
+    const user = await this.prisma.user.findUnique({ where: { id: receiverUserId }, select: { fcmToken: true } });
+    if (!user?.fcmToken) return;
+    try {
+      await admin.messaging().send({
+        token: user.fcmToken,
+        data: { type: 'call_cancelled', callId: callId },
+        android: { priority: 'high' },
+      });
+      this.logger.log(`Iptal push gonderildi: ${receiverUserId}`);
+    } catch (e) {
+      this.logger.error('Iptal push gonderilemedi: ' + e.message);
+    }
+  }
 }
