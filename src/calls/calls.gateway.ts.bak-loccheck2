@@ -148,34 +148,11 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:start-flat')
   async onCallStartFlat(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { apartmentId: string; lat?: number; lng?: number },
+    @MessageBody() data: { apartmentId: string },
   ) {
     const callerUserId = client.data.userId;
     const isGuest = client.data.isGuest === true;
 
-    if (isGuest) {
-      const apt = await this.prisma.apartment.findUnique({
-        where: { id: data.apartmentId },
-        include: { building: { select: { latitude: true, longitude: true, locationCheckEnabled: true, locationCheckRadius: true } } },
-      });
-      const b = apt?.building;
-      if (b && b.locationCheckEnabled) {
-        if (typeof data.lat !== 'number' || typeof data.lng !== 'number') {
-          client.emit('call:unavailable', { reason: 'Aramak icin konum izni gerekli' });
-          return;
-        }
-        const R = 6371000;
-        const toRad = (x: number) => (x * Math.PI) / 180;
-        const dLat = toRad(data.lat - b.latitude);
-        const dLng = toRad(data.lng - b.longitude);
-        const aa = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(b.latitude)) * Math.cos(toRad(data.lat)) * Math.sin(dLng / 2) ** 2;
-        const dist = R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa)); // Haversine
-        if (dist > (b.locationCheckRadius || 150)) {
-          client.emit('call:unavailable', { reason: 'Aramak icin binanin yakininda olmalisiniz' });
-          return;
-        }
-      }
-    }
     // Dairedeki tum sakinler
     const residents = await this.prisma.resident.findMany({
       where: { apartmentId: data.apartmentId, visible: true, approved: true, user: { blocked: false } },

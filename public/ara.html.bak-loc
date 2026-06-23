@@ -237,26 +237,13 @@
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 
-    function getPos() {
-      return new Promise((resolve) => {
-        if (!navigator.geolocation) { resolve(null); return; }
-        navigator.geolocation.getCurrentPosition(
-          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          () => resolve(null),
-          { enableHighAccuracy: true, timeout: 8000 }
-        );
-      });
-    }
     async function callFlat(apartmentId, name) {
       currentPeerId = null;
       try {
         if (!await setupCall(name)) return;
-        const pos = await getPos();
         socket.on('connect', () => {
           document.getElementById('callStatus').textContent = name + ' çalınıyor...';
-          const payload = { apartmentId };
-          if (pos) { payload.lat = pos.lat; payload.lng = pos.lng; }
-          socket.emit('call:start-flat', payload);
+          socket.emit('call:start-flat', { apartmentId });
         });
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
