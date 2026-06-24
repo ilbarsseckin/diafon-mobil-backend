@@ -1,0 +1,7 @@
+DATABASE_URL="postgresql://diafon_user:c6a5a29907c5ae170e03b1cbc02f3eef@diafon-mobil-db:5432/diafon_mobil"
+
+# iyzico (sandbox - canliya gecince degerleri degistir)
+IYZICO_API_KEY=sandbox-Ak32u3GU5aq87PfKVm37dZARWhVvnD1T
+IYZICO_SECRET_KEY=sandbox-uqG6I26N1sVgBQR5oplYiJCEaCVSuRZN
+IYZICO_BASE_URL=https://sandbox-api.iyzipay.com
+IYZICO_CALLBACK_URL=https://mobildiafon.com/api/payment/callback

@@ -9,6 +9,7 @@ import { CallsModule } from './calls/calls.module';
 import { DoorModule } from './door/door.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { SuperadminModule } from './superadmin/superadmin.module';
+import { PaymentModule } from './payment/payment.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SuperadminModule } from './superadmin/superadmin.module';
     DoorModule,
     SubscriptionModule,
     SuperadminModule,
+    PaymentModule,
   ],
   controllers: [HealthController],
   providers: [],
