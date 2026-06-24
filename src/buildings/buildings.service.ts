@@ -321,7 +321,7 @@ export class BuildingsService {
    */
   async nearbyBuildings(lat: number, lng: number, radiusMeters = 150) {
     const buildings = await this.prisma.$queryRaw<any[]>`
-      SELECT id, building_name, address,
+      SELECT id, building_name, address, type,
         ST_Distance(
           geography(ST_MakePoint(longitude, latitude)),
           geography(ST_MakePoint(${lng}, ${lat}))
@@ -339,6 +339,7 @@ export class BuildingsService {
       id: b.id,
       buildingName: b.building_name,
       address: b.address,
+      type: b.type || 'residential',
       distance: Math.round(Number(b.distance)),
     }));
   }
@@ -396,5 +397,48 @@ export class BuildingsService {
     }
 
     return { success: true, buildings: createdBuildings };
+  }
+
+  // Isyeri (ticari birim) olustur - tek bina, tek birim, type=business
+  async createBusiness(userId: string, dto: {
+    businessName: string;
+    category?: string;
+    latitude: number;
+    longitude: number;
+    address?: string;
+  }) {
+    if (!dto.businessName?.trim()) {
+      return { success: false, message: 'Isletme adi gerekli' };
+    }
+    if (dto.latitude == null || dto.longitude == null) {
+      return { success: false, message: 'Konum gerekli' };
+    }
+    // Isyeri sahibi otomatik premium (yonetici gibi)
+    await this.prisma.user.update({ where: { id: userId }, data: { isPremium: true } });
+
+    const token = 'DIAFON-' + randomUUID().replace(/-/g, '');
+    const building = await this.prisma.building.create({
+      data: {
+        buildingName: dto.businessName.trim(),
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        address: dto.address || null,
+        radiusMeter: 100,
+        qrToken: token,
+        ownerUserId: userId,
+        requireApproval: false,
+        type: 'business',
+        businessCategory: dto.category || null,
+      },
+    });
+    // Tek birim (daire)
+    const apartment = await this.prisma.apartment.create({
+      data: { buildingId: building.id, flatNo: '1' },
+    });
+    // Sahibi otomatik onayli sakin (cagriyi o alir)
+    await this.prisma.resident.create({
+      data: { userId, apartmentId: apartment.id, approved: true, visible: true },
+    });
+    return { success: true, building: { id: building.id, buildingName: dto.businessName.trim(), qrToken: token, apartmentId: apartment.id } };
   }
 }

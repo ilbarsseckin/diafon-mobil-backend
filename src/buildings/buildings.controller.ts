@@ -730,6 +730,18 @@ export class BuildingsController {
     return this.service.createStructure(req.user.userId, body);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('create-business')
+  async createBusiness(@Req() req: any, @Body() body: {
+    businessName: string;
+    category?: string;
+    latitude: number;
+    longitude: number;
+    address?: string;
+  }) {
+    return this.service.createBusiness(req.user.userId, body);
+  }
+
   // --- Admin: bina yonetimi ---
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')

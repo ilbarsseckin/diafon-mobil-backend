@@ -58,6 +58,8 @@ model Building {
   imageUrl     String?  @map("image_url")
   locationCheckEnabled Boolean @default(false) @map("location_check_enabled")
   locationCheckRadius  Int     @default(150) @map("location_check_radius")
+  type         String   @default("residential")
+  businessCategory String? @map("business_category")
   doorAdapter  String?  @map("door_adapter")
   doorDeviceId String?  @map("door_device_id")
   doorEnabled  Boolean  @default(false) @map("door_enabled")
