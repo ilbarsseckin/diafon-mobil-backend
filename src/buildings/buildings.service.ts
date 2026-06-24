@@ -319,6 +319,48 @@ export class BuildingsService {
    * Bir konuma yakin TUM binalari listele (cift bina onleme icin).
    * Sadece bina bilgisi + mesafe doner (sakin yok).
    */
+  // Yakindaki GORUNUR binalar (securityMode location/both + ziyaretci binanin KENDI radius'u icinde)
+  // Mahremiyet: sakin listesi DONDURMEZ, sadece bina karti.
+  async nearbyVisible(lat: number, lng: number) {
+    const buildings = await this.prisma.$queryRaw<any[]>`
+      SELECT id, building_name, address, type, business_category, block_name, site_name,
+        security_mode, image_url, qr_token,
+        ST_Distance(
+          geography(ST_MakePoint(longitude, latitude)),
+          geography(ST_MakePoint(${lng}, ${lat}))
+        ) AS distance
+      FROM buildings
+      WHERE security_mode IN ('location', 'both')
+        AND ST_DWithin(
+          geography(ST_MakePoint(longitude, latitude)),
+          geography(ST_MakePoint(${lng}, ${lat})),
+          location_check_radius
+        )
+      ORDER BY distance ASC
+      LIMIT 50
+    `;
+    // Her bina icin daire/birim sayisi
+    const result: any[] = [];
+    for (const b of buildings) {
+      const flatCount = await this.prisma.apartment.count({ where: { buildingId: b.id } });
+      result.push({
+        id: b.id,
+        buildingName: b.building_name,
+        address: b.address,
+        type: b.type || 'residential',
+        businessCategory: b.business_category,
+        blockName: b.block_name,
+        siteName: b.site_name,
+        securityMode: b.security_mode,
+        imageUrl: b.image_url,
+        qrToken: b.qr_token,
+        flatCount,
+        distance: Math.round(Number(b.distance)),
+      });
+    }
+    return result;
+  }
+
   async nearbyBuildings(lat: number, lng: number, radiusMeters = 150) {
     const buildings = await this.prisma.$queryRaw<any[]>`
       SELECT id, building_name, address, type,

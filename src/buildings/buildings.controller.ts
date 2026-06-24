@@ -32,6 +32,14 @@ export class BuildingsController {
   }
 
   // --- Yakindaki TUM binalar (cift bina onleme) ---
+  @Get('nearby-visible')
+  async nearbyVisible(@Query('lat') lat: string, @Query('lng') lng: string) {
+    const latNum = parseFloat(lat);
+    const lngNum = parseFloat(lng);
+    if (isNaN(latNum) || isNaN(lngNum)) return [];
+    return this.service.nearbyVisible(latNum, lngNum);
+  }
+
   @Get('nearby-list')
   nearbyList(@Query('lat') lat: string, @Query('lng') lng: string) {
     const latNum = parseFloat(lat);
