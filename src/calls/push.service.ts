@@ -43,7 +43,11 @@ export class PushService {
     try {
       await admin.messaging().send({
         token: user.fcmToken,
-        // Sadece data - notification YOK (arka planda handler çalışsın diye)
+        // notification + data: olu uygulamaya da bildirim ulassin
+        notification: {
+          title: 'Gelen Arama',
+          body: `${callerName} sizi ariyor`,
+        },
         data: {
           type: 'incoming_call',
           callId: callId,
@@ -54,6 +58,13 @@ export class PushService {
         },
         android: {
           priority: 'high',
+          ttl: 0,
+          notification: {
+            channelId: 'incoming_calls',
+            priority: 'max',
+            sound: 'default',
+            visibility: 'public',
+          },
         },
       });
       this.logger.log(`Push (data) gonderildi: ${receiverUserId}`);
