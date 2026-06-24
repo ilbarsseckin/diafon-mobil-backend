@@ -148,7 +148,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:start-flat')
   async onCallStartFlat(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { apartmentId: string; lat?: number; lng?: number },
+    @MessageBody() data: { apartmentId: string; lat?: number; lng?: number; source?: string },
   ) {
     const callerUserId = client.data.userId;
     const isGuest = client.data.isGuest === true;
@@ -156,10 +156,17 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (isGuest) {
       const apt = await this.prisma.apartment.findUnique({
         where: { id: data.apartmentId },
-        include: { building: { select: { latitude: true, longitude: true, locationCheckEnabled: true, locationCheckRadius: true } } },
+        include: { building: { select: { latitude: true, longitude: true, locationCheckEnabled: true, locationCheckRadius: true, securityMode: true } } },
       });
       const b = apt?.building;
-      if (b && b.locationCheckEnabled) {
+      const mode = (b as any)?.securityMode || (b?.locationCheckEnabled ? 'location' : 'qr');
+      // both: aramak icin QR sart (konumdan gelen reddedilir)
+      if (b && mode === 'both' && data.source !== 'qr') {
+        client.emit('call:unavailable', { reason: 'Bu bina icin QR kod okutmaniz gerekli' });
+        return;
+      }
+      // location: konum dogrulama (radius icinde mi)
+      if (b && mode === 'location') {
         if (typeof data.lat !== 'number' || typeof data.lng !== 'number') {
           client.emit('call:unavailable', { reason: 'Aramak icin konum izni gerekli' });
           return;

@@ -203,6 +203,7 @@ export class BuildingsController {
           imageUrl: b.imageUrl,
           locationCheckEnabled: b.locationCheckEnabled,
           locationCheckRadius: b.locationCheckRadius,
+          securityMode: b.securityMode || 'qr',
           requireApproval: b.requireApproval,
           flatCount: flats.length,
           residentCount: flats.reduce((s, a) => s + a.residents.length, 0),
@@ -562,6 +563,25 @@ export class BuildingsController {
       data: { locationCheckEnabled: !!body.enabled, locationCheckRadius: r },
     });
     return { success: true, enabled: !!body.enabled, radius: r };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('set-security-mode')
+  async setSecurityMode(@Req() req: any, @Body() body: { buildingId: string; mode: string; radius?: number }) {
+    const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi' };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    const validModes = ['qr', 'location', 'both'];
+    if (!validModes.includes(body.mode)) return { success: false, message: 'Gecersiz mod' };
+    let r = building.locationCheckRadius;
+    if (typeof body.radius === 'number' && body.radius >= 20 && body.radius <= 2000) r = Math.round(body.radius);
+    // securityMode + geriye uyumluluk: locationCheckEnabled'i de senkronla (FAZ 3D eski kod icin)
+    const locEnabled = body.mode === 'location' || body.mode === 'both';
+    await this.prisma.building.update({
+      where: { id: body.buildingId },
+      data: { securityMode: body.mode, locationCheckEnabled: locEnabled, locationCheckRadius: r },
+    });
+    return { success: true, mode: body.mode, radius: r };
   }
 
   // --- YONETICI: bina kapilari listele (yonetim) ---

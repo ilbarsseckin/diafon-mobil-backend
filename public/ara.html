@@ -254,7 +254,7 @@
         const pos = await getPos();
         socket.on('connect', () => {
           document.getElementById('callStatus').textContent = name + ' çalınıyor...';
-          const payload = { apartmentId };
+          const payload = { apartmentId, source: 'qr' };
           if (pos) { payload.lat = pos.lat; payload.lng = pos.lng; }
           socket.emit('call:start-flat', payload);
         });
