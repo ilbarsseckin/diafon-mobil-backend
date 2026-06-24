@@ -213,7 +213,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (sid) {
         this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: '', buildingId: flatBuildingId });
       }
-      await this.push.sendIncomingCall(r.user.id, caller?.name || 'Ziyaretçi', callId, callerUserId, undefined);
+      await this.push.sendIncomingCall(r.user.id, caller?.name || 'Ziyaretçi', callId, callerUserId, undefined, flatBuildingId || undefined);
     }
 
     client.emit('call:ringing', { callId });
