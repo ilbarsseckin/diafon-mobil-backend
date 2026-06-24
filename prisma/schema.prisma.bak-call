@@ -124,18 +124,16 @@ model Resident {
 
 model Call {
   id             String     @id @default(uuid())
-  callerUserId   String?    @map("caller_user_id")
+  callerUserId   String     @map("caller_user_id")
   receiverUserId String     @map("receiver_user_id")
   buildingId     String?    @map("building_id")
-  apartmentId    String?    @map("apartment_id")
-  guestName      String?    @map("guest_name")
   startedAt      DateTime   @default(now()) @map("started_at")
   endedAt        DateTime?  @map("ended_at")
   duration       Int?       // saniye
   callerPhotoUrl String?    @map("caller_photo_url")
   status         CallStatus @default(RINGING)
 
-  caller         User?      @relation("CallsMade", fields: [callerUserId], references: [id])
+  caller         User       @relation("CallsMade", fields: [callerUserId], references: [id])
   receiver       User       @relation("CallsReceived", fields: [receiverUserId], references: [id])
   building       Building?  @relation(fields: [buildingId], references: [id])
 

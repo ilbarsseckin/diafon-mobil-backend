@@ -16,7 +16,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Misafir cagrilari: callId -> { callerSocketId, callerUserId, receiverUserId }
   private guestCalls = new Map<string, { callerSocketId: string; callerUserId: string; receiverUserId: string }>();
   // Daire (grup) cagrilari: callId -> { tum alicilar, cevaplandi mi }
-  private flatCallTargets = new Map<string, { receiverIds: string[]; answered: boolean }>();
+  private flatCallTargets = new Map<string, { receiverIds: string[]; answered: boolean; buildingId: string | null; apartmentId: string; guestName: string | null; callerUserId: string | null }>();
 
   constructor(
     private jwt: JwtService,
@@ -59,7 +59,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const flat = this.flatCallTargets.get(callId);
         if (flat && !flat.answered) {
           for (const uid of flat.receiverIds) {
-            const sid = await this.presence.getSocketId(uid);
+            const sid = await this.presence.getSocketId(uid!);
             if (sid) {
               this.server.to(sid).emit('call:ended', { callId });
               this.server.to(sid).emit('call:taken', { callId });
@@ -205,7 +205,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     const receiverIds = residents.map(r => r.user.id);
-    this.flatCallTargets.set(callId, { receiverIds, answered: false });
+    this.flatCallTargets.set(callId, { receiverIds, answered: false, buildingId: flatBuildingId, apartmentId: data.apartmentId, guestName: isGuest ? (client.data.guestName || 'Ziyaretçi') : null, callerUserId: isGuest ? null : callerUserId });
 
     // Tum sakinlere cagri gonder (online -> socket, offline -> push)
     for (const r of residents) {
@@ -268,7 +268,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const caller = { id: callerUserId, name: (me?.name || 'Sakin') + ' (Daire ' + (apt.flatNo || '-') + ')', photoUrl: me?.photoUrl || null };
     this.guestCalls.set(callId, { callerSocketId: client.id, callerUserId, receiverUserId: guardUsers[0].id });
     const receiverIds = guardUsers.map(u => u.id);
-    this.flatCallTargets.set(callId, { receiverIds, answered: false });
+    this.flatCallTargets.set(callId, { receiverIds, answered: false, buildingId: null, apartmentId: '', guestName: null, callerUserId: client.data.userId || null });
     for (const gu of guardUsers) {
       const sid = await this.presence.getSocketId(gu.id);
       if (sid) this.server.to(sid).emit('call:incoming', { callId, caller, callerPhoto: caller.photoUrl || '' });
@@ -303,6 +303,21 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       flat.answered = true;
       const accepterId = client.data.userId;
+      // Cevaplandi -> DB'ye cagri kaydi yaz (istatistik icin)
+      try {
+        await this.prisma.call.create({
+          data: {
+            callerUserId: flat.callerUserId,
+            guestName: flat.guestName,
+            receiverUserId: accepterId,
+            buildingId: flat.buildingId,
+            apartmentId: flat.apartmentId,
+            status: 'ACCEPTED',
+          },
+        });
+      } catch (e) {
+        this.logger.error('Flat cagri kaydedilemedi: ' + e);
+      }
       // Arayana: kabul edildi (WebRTC baslasin), kabul eden kisiyle
       if (g) {
         this.server.to(g.callerSocketId).emit('call:accepted', { callId: data.callId, accepterId });
@@ -312,7 +327,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Diger sakinlere: cagri baskasi tarafindan alindi
       for (const uid of flat.receiverIds) {
         if (uid === accepterId) continue;
-        const sid = await this.presence.getSocketId(uid);
+        const sid = await this.presence.getSocketId(uid!);
         if (sid) this.server.to(sid).emit('call:taken', { callId: data.callId });
       }
       return;
@@ -330,7 +345,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       where: { id: data.callId },
       data: { status: 'ACCEPTED' },
     });
-    const callerSocketId = await this.presence.getSocketId(call.callerUserId);
+    const callerSocketId = await this.presence.getSocketId(call.callerUserId!);
     if (callerSocketId) {
       this.server.to(callerSocketId).emit('call:accepted', { callId: call.id });
     }
@@ -370,7 +385,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       where: { id: data.callId },
       data: { status: 'REJECTED', endedAt: new Date() },
     });
-    const callerSocketId = await this.presence.getSocketId(call.callerUserId);
+    const callerSocketId = await this.presence.getSocketId(call.callerUserId!);
     if (callerSocketId) {
       this.server.to(callerSocketId).emit('call:rejected', { callId: call.id });
     }
@@ -389,7 +404,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // TUM alicilara bitti + CallKit kapat (henuz cevaplamamis olanlar dahil)
       if (flat) {
         for (const uid of flat.receiverIds) {
-          const sid = await this.presence.getSocketId(uid);
+          const sid = await this.presence.getSocketId(uid!);
           if (sid) {
             this.server.to(sid).emit('call:ended', { callId: data.callId });
             this.server.to(sid).emit('call:taken', { callId: data.callId });
@@ -426,7 +441,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       data: { status: 'ENDED', endedAt: new Date(), duration },
     });
     for (const uid of [call.callerUserId, call.receiverUserId]) {
-      const sid = await this.presence.getSocketId(uid);
+      const sid = await this.presence.getSocketId(uid!);
       if (sid) this.server.to(sid).emit('call:ended', { callId: call.id });
     }
   }
