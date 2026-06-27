@@ -63,19 +63,26 @@ export class SubscriptionService {
         where: { ownerUserId: userId, scopeType: g.scopeType, scopeName: g.scopeName },
         orderBy: { createdAt: 'desc' },
       });
-      // Yoksa 14 gun deneme baslat
+      // Yoksa abonelik baslat. Ama bu kullanici daha once deneme kullanmissa (expired/active gecmisi),
+      // tekrar bedava deneme HAKKI YOK -> direkt odeme bekleyen durumda baslat.
       if (!sub) {
+        const usedTrialBefore = await this.prisma.subscription.findFirst({
+          where: {
+            ownerUserId: userId,
+            status: { in: ['expired', 'active', 'cancelled'] },
+          },
+        });
         const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
         sub = await this.prisma.subscription.create({
           data: {
             ownerUserId: userId,
             scopeType: g.scopeType,
             scopeName: g.scopeName,
-            status: 'trial',
+            status: usedTrialBefore ? 'pending_payment' : 'trial',
             flatCount: g.flatCount,
             monthlyPrice: planPrice,
-            trialEndsAt: trialEnd,
-            currentPeriodEnd: trialEnd,
+            trialEndsAt: usedTrialBefore ? new Date() : trialEnd,
+            currentPeriodEnd: usedTrialBefore ? new Date() : trialEnd,
           },
         });
       } else if (sub.flatCount !== g.flatCount) {
