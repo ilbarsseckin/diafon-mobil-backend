@@ -2,6 +2,7 @@ import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, BadReques
 import { PrismaService } from '../prisma/prisma.service';
 import { BuildingsService } from './buildings.service';
 import { PushService } from '../calls/push.service';
+import { SmsService } from '../sms/sms.service';
 import { CreateBuildingDto } from './dto/building.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -9,7 +10,7 @@ import { Roles } from '../auth/guards/roles.decorator';
 
 @Controller('buildings')
 export class BuildingsController {
-  constructor(private service: BuildingsService, private prisma: PrismaService, private push: PushService) {}
+  constructor(private service: BuildingsService, private prisma: PrismaService, private push: PushService, private sms: SmsService) {}
 
   // --- Herkese acik: konuma gore bina + sakin listesi ---
   @Get('nearby')
@@ -48,6 +49,14 @@ export class BuildingsController {
       throw new BadRequestException('Konum gerekli');
     }
     return this.service.nearbyBuildings(latNum, lngNum);
+  }
+  // --- Herkese acik: web'den telefon ile katilim ---
+  @Post('web-join')
+  webJoin(@Body() body: { buildingId: string; flatNo: string; name?: string; phone: string }) {
+    if (!body.buildingId || !body.flatNo || !body.phone) {
+      throw new BadRequestException('Bina, daire ve telefon zorunlu');
+    }
+    return this.service.webJoin(body);
   }
 
   // --- Sakin: evini ekle / var olan binaya katil ---
@@ -197,6 +206,7 @@ export class BuildingsController {
         flats.sort((x, y) => numCmp(x.flatNo, y.flatNo));
         return {
           id: b.id,
+          qrToken: b.qrToken,
           buildingName: b.buildingName,
           siteName: b.siteName,
           blockName: b.blockName,
@@ -212,6 +222,8 @@ export class BuildingsController {
             flatNo: a.flatNo,
             floor: a.floor,
             listingStatus: a.listingStatus,
+            qrToken: a.qrToken,
+            qrLabel: a.qrLabel,
             residents: a.residents.map((r) => ({
               residentId: r.id,
               userId: r.user.id,
@@ -248,9 +260,20 @@ export class BuildingsController {
   @UseGuards(JwtAuthGuard)
   @Get('list-security')
   async listSecurity(@Req() req: any) {
-    const guards = await this.prisma.securityGuard.findMany({
+    const guardRecords = await this.prisma.securityGuard.findMany({
       where: { ownerUserId: req.user.userId },
       orderBy: { createdAt: 'asc' },
+    });
+    const phones = guardRecords.map((g) => g.phone);
+    const users = phones.length
+      ? await this.prisma.user.findMany({
+          where: { phone: { in: phones } },
+          select: { id: true, phone: true },
+        })
+      : [];
+    const guards = guardRecords.map((g) => {
+      const u = users.find((x) => x.phone === g.phone);
+      return { ...g, userId: u?.id || null };
     });
     return { guards };
   }
@@ -420,8 +443,9 @@ export class BuildingsController {
     if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
     const exists = await this.prisma.apartment.findFirst({ where: { buildingId: body.buildingId, flatNo } });
     if (exists) return { success: false, message: 'Bu daire no zaten var' };
+    const flatToken = require('crypto').randomBytes(16).toString('hex');
     await this.prisma.apartment.create({
-      data: { buildingId: body.buildingId, flatNo, floor: body.floor || null },
+      data: { buildingId: body.buildingId, flatNo, floor: body.floor || null, qrToken: flatToken },
     });
     return { success: true };
   }
@@ -501,8 +525,8 @@ export class BuildingsController {
       orderBy: { startedAt: 'desc' },
       take: 100,
       include: {
-        caller: { select: { name: true, phone: true } },
-        receiver: { select: { name: true, phone: true } },
+        callerUser: { select: { name: true, phone: true } },
+        receiverUser: { select: { name: true, phone: true } },
       },
     });
     return {
@@ -515,10 +539,10 @@ export class BuildingsController {
           : null;
         return {
           id: c.id,
-          callerName: c.caller?.name || null,
-          callerPhone: c.caller?.phone || null,
-          receiverName: c.receiver?.name || null,
-          receiverPhone: c.receiver?.phone || null,
+          callerName: c.callerUser?.name || null,
+          callerPhone: c.callerUser?.phone || null,
+          receiverName: c.receiverUser?.name || null,
+          receiverPhone: c.receiverUser?.phone || null,
           buildingLabel: label,
           flatNo: info?.flatNo || null,
           startedAt: c.startedAt,
@@ -652,6 +676,59 @@ export class BuildingsController {
     return { success: true, status: body.status };
   }
 
+  // --- YONETICI: daire QR etiketini guncelle ---
+  @UseGuards(JwtAuthGuard)
+  @Post('set-flat-qr-label')
+  async setFlatQrLabel(@Req() req: any, @Body() body: { apartmentId: string; label: string }) {
+    const apartment = await this.prisma.apartment.findUnique({
+      where: { id: body.apartmentId },
+      include: { building: true },
+    });
+    if (!apartment) return { success: false, message: 'Daire bulunamadi' };
+    if (apartment.building.ownerUserId !== req.user.userId) {
+      return { success: false, message: 'Bu daire icin yetkiniz yok' };
+    }
+    const label = (body.label || '').trim().slice(0, 80);
+    await this.prisma.apartment.update({
+      where: { id: body.apartmentId },
+      data: { qrLabel: label || null },
+    });
+    return { success: true, label };
+  }
+
+  // --- Herkese acik: daire QR token ile daire + sakin bilgisi ---
+  @Get('by-flat-qr')
+  async byFlatQr(@Query('token') token: string) {
+    if (!token) throw new BadRequestException('QR token gerekli');
+    const apartment = await this.prisma.apartment.findUnique({
+      where: { qrToken: token },
+      include: {
+        building: { select: { id: true, buildingName: true, qrToken: true, imageUrl: true } },
+        residents: {
+          where: { approved: true, visible: true, user: { blocked: false } },
+          include: { user: { select: { id: true, name: true, photoUrl: true, isOnline: true } } },
+        },
+      },
+    });
+    if (!apartment) return { found: false, message: 'Gecersiz QR kod' };
+    return {
+      found: true,
+      flat: {
+        apartmentId: apartment.id,
+        flatNo: apartment.flatNo,
+        floor: apartment.floor,
+        qrLabel: apartment.qrLabel,
+      },
+      building: apartment.building,
+      residents: apartment.residents.map(r => ({
+        userId: r.user.id,
+        name: r.user.name,
+        photoUrl: r.user.photoUrl,
+        isOnline: r.user.isOnline,
+      })),
+    };
+  }
+
   // --- YONETICI: bekleyen sakinleri listele ---
   @UseGuards(JwtAuthGuard)
   @Get('pending-residents')
@@ -701,6 +778,17 @@ export class BuildingsController {
       return { success: false, message: 'Yetkiniz yok' };
     }
     await this.prisma.resident.update({ where: { id: body.residentId }, data: { approved: true } });
+    // Sakine onay SMS'i gonder
+    try {
+      const fullResident = await this.prisma.resident.findUnique({
+        where: { id: body.residentId },
+        include: { user: { select: { phone: true } }, apartment: { select: { flatNo: true } } },
+      });
+      if (fullResident?.user?.phone) {
+        const msg = `Diafon: ${building.buildingName} - Daire ${fullResident.apartment.flatNo} icin katiliminiz onaylandi. Uygulamayi indirip telefonunuzla giris yapin: https://mobildiafon.com`;
+        await this.sms.send(fullResident.user.phone, msg);
+      }
+    } catch (e) {}
     return { success: true };
   }
 
@@ -766,6 +854,7 @@ export class BuildingsController {
     latitude: number;
     longitude: number;
     address?: string;
+    unitCount?: number;
   }) {
     return this.service.createBusiness(req.user.userId, body);
   }

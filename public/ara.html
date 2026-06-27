@@ -7,20 +7,34 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, sans-serif; background: #f5f5f5; color: #222; }
-    .header { background: #E63946; color: white; padding: 20px; text-align: center; }
-    .header h1 { font-size: 20px; }
-    .building { padding: 16px; background: white; margin: 12px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
-    .building h2 { font-size: 18px; color: #E63946; }
-    .building p { color: #666; font-size: 14px; margin-top: 4px; }
-    .item { display: flex; align-items: center; padding: 14px 16px; background: white; margin: 8px 12px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-    .item .info { flex: 1; }
-    .item .name { font-weight: 600; }
-    .item .sub { color: #888; font-size: 13px; margin-top: 2px; }
-    .item button { background: #E63946; color: white; border: none; padding: 10px 18px; border-radius: 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .loading, .error { text-align: center; padding: 40px; color: #888; }
-    .section-title { padding: 12px 16px 4px; color: #999; font-size: 13px; font-weight: 600; }
-    .back-btn { display: inline-flex; align-items: center; gap: 6px; margin: 12px; padding: 8px 14px; background: white; border: none; border-radius: 20px; color: #E63946; font-weight: 600; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f6fa; color: #1a2233; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 560px; margin: 0 auto; min-height: 100vh; background: #f4f6fa; }
+    .header { background: linear-gradient(135deg, #E63946 0%, #c1121f 100%); color: white; padding: 26px 20px 30px; text-align: center; border-radius: 0 0 24px 24px; box-shadow: 0 4px 20px rgba(230,57,70,0.25); }
+    .header .logo { height: auto; max-height: 56px; max-width: 220px; width: auto; margin: 0 auto 10px; display: block; background: #fff; padding: 10px 16px; border-radius: 12px; object-fit: contain; }
+    .header .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+    .header .slogan { font-size: 13.5px; opacity: 0.92; margin-top: 4px; font-weight: 500; }
+    .header .trust { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; background: rgba(255,255,255,0.18); padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .steps { display: flex; justify-content: center; gap: 8px; padding: 16px 12px 4px; flex-wrap: wrap; }
+    .step { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; background: #fff; padding: 7px 12px; border-radius: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .step b { background: #E63946; color: #fff; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+    .building { padding: 18px; background: white; margin: 14px 12px 8px; border-radius: 16px; box-shadow: 0 2px 12px rgba(20,33,61,0.06); }
+    .building h2 { font-size: 19px; color: #1a2233; font-weight: 800; }
+    .building p { color: #6b7280; font-size: 14px; margin-top: 4px; }
+    .item { display: flex; align-items: center; padding: 14px 16px; background: white; margin: 8px 12px; border-radius: 14px; box-shadow: 0 2px 10px rgba(20,33,61,0.05); transition: transform .12s, box-shadow .12s; }
+    .item:active { transform: scale(0.99); }
+    .item .info { flex: 1; min-width: 0; }
+    .item .name { font-weight: 700; font-size: 15px; }
+    .item .sub { color: #9099a8; font-size: 13px; margin-top: 2px; }
+    .item button { background: #E63946; color: white; border: none; padding: 10px 20px; border-radius: 22px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 3px 10px rgba(230,57,70,0.3); transition: background .12s; }
+    .item button:active { background: #c1121f; }
+    .loading, .error { text-align: center; padding: 48px 24px; color: #9099a8; font-size: 15px; }
+    .section-title { padding: 16px 18px 6px; color: #9099a8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+    .back-btn { display: inline-flex; align-items: center; gap: 6px; margin: 14px 12px 4px; padding: 9px 16px; background: white; border: none; border-radius: 22px; color: #E63946; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(20,33,61,0.06); }
+    .site-footer { margin: 24px 12px 16px; padding: 22px 18px; background: linear-gradient(135deg, #1a2233 0%, #2a3548 100%); border-radius: 18px; text-align: center; color: #fff; }
+    .site-footer .ttl { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    .site-footer .txt { font-size: 13px; opacity: 0.8; margin-bottom: 14px; line-height: 1.5; }
+    .site-footer .cta { display: inline-block; background: #E63946; color: #fff; text-decoration: none; padding: 11px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; box-shadow: 0 4px 14px rgba(230,57,70,0.35); }
+    .site-footer .link { display: block; margin-top: 14px; color: #aab3c5; font-size: 12px; text-decoration: none; }
 
     #callScreen { display: none; position: fixed; inset: 0; background: #111; z-index: 100; flex-direction: column; }
     #remoteVideo { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; background: #222; }
@@ -35,8 +49,26 @@
   </style>
 </head>
 <body>
-  <div class="header"><h1>🚪 Mobil Diafon</h1></div>
+  <div class="wrap">
+  <div class="header">
+    <img class="logo" src="https://cdn.mobildiafon.com/logo/logo.webp" alt="MobilDiafon" onerror="this.parentElement.querySelector('.brand').style.display='block'">
+    <div class="brand" style="display:none">MobilDiafon</div>
+    <div class="slogan">Kapınızı dijitalleştirin</div>
+    <div class="trust">🔒 Güvenli görüntülü görüşme</div>
+  </div>
+  <div class="steps">
+    <div class="step"><b>1</b> Daire / kişi seç</div>
+    <div class="step"><b>2</b> Ara</div>
+    <div class="step"><b>3</b> Görüntülü görüş</div>
+  </div>
   <div id="content"><div class="loading">Yükleniyor...</div></div>
+  <div class="site-footer">
+    <div class="ttl">Siz de binanıza MobilDiafon kurun</div>
+    <div class="txt">Diafon artık cebinizde. QR ile dijital diafon, görüntülü arama ve daha fazlası.</div>
+    <a class="cta" href="https://mobildiafon.com" target="_blank" rel="noopener">Keşfet →</a>
+    <a class="link" href="https://mobildiafon.com" target="_blank" rel="noopener">mobildiafon.com</a>
+  </div>
+  </div>
 
   <div id="callScreen">
     <video id="remoteVideo" autoplay playsinline></video>
@@ -78,6 +110,13 @@
 
         const flatParam = params.get('flat');
         const userParam = params.get('user');
+        const guardParam = params.get('guard');
+
+        // Guvenlik QR -> sadece guvenligi goster
+        if (guardParam && data.guards && data.guards.length > 0) {
+          renderGuardOnly(data, guardParam);
+          return;
+        }
 
         // SITE ise ve ozel parametre yoksa -> blok secim ekrani
         if (data.isSite && data.blocks && data.blocks.length > 0 && !flatParam && !userParam) {
@@ -119,6 +158,23 @@
       }
     }
 
+    function renderGuardOnly(data, guardId) {
+      const content = document.getElementById('content');
+      let guard = (data.guards || []).find(g => String(g.userId) === String(guardId));
+      if (!guard) guard = (data.guards || [])[0];
+      let html = '<div class="building"><h2>' + data.building.buildingName + '</h2><p>Güvenlik / Danışma</p></div>';
+      html += '<div class="section-title">GÜVENLİK / DANIŞMA</div>';
+      const online = guard.isOnline ? '<span style="color:#1a8a4a;font-size:12px;">● çevrimiçi</span>' : '<span style="color:#bbb;font-size:12px;">● çevrimdışı</span>';
+      const gphoto = guard.photoUrl
+        ? '<img src="' + (guard.photoUrl.startsWith('http') ? guard.photoUrl : 'https://mobildiafon.com' + guard.photoUrl) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;margin-right:12px;">'
+        : '<div style="width:46px;height:46px;border-radius:50%;background:#1a2a4a;display:flex;align-items:center;justify-content:center;margin-right:12px;font-size:20px;">🛡️</div>';
+      html += '<div class="item">' + gphoto + '<div class="info">'
+        + '<div class="name">' + guard.name + '</div>'
+        + '<div class="sub">' + online + '</div></div>'
+        + '<button onclick="callUser(\'' + guard.userId + '\',\'' + guard.name.replace(/'/g,"") + '\')">Ara</button></div>';
+      content.innerHTML = html;
+    }
+
     function renderResidents(data, flatParam, userParam, blockToken) {
       const content = document.getElementById('content');
       let residents = data.residents || [];
@@ -158,6 +214,21 @@
         if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, listingStatus: r.listingStatus, people: [] };
         flats[key].people.push(r);
       });
+
+      // Guvenlik / Danisma bolumu (varsa)
+      if (data.guards && data.guards.length > 0) {
+        html += '<div class="section-title">GÜVENLİK / DANIŞMA</div>';
+        data.guards.forEach(g => {
+          const online = g.isOnline ? '<span style="color:#1a8a4a;font-size:12px;">● çevrimiçi</span>' : '<span style="color:#bbb;font-size:12px;">● çevrimdışı</span>';
+          const gphoto = g.photoUrl
+            ? '<img src="' + (g.photoUrl.startsWith('http') ? g.photoUrl : 'https://mobildiafon.com' + g.photoUrl) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;margin-right:12px;">'
+            : '<div style="width:46px;height:46px;border-radius:50%;background:#1a2a4a;display:flex;align-items:center;justify-content:center;margin-right:12px;font-size:20px;">🛡️</div>';
+          html += '<div class="item">' + gphoto + '<div class="info">'
+            + '<div class="name">' + g.name + '</div>'
+            + '<div class="sub">' + online + '</div></div>'
+            + '<button onclick="callUser(\'' + g.userId + '\',\'' + g.name.replace(/'/g,"") + '\')">Ara</button></div>';
+        });
+      }
 
       html += '<div class="section-title">DAİRELER</div>';
       Object.values(flats).forEach(f => {
@@ -230,10 +301,11 @@
       currentPeerId = userId;
       try {
         if (!await setupCall(name)) return;
-        socket.on('connect', () => {
+        const startUser = () => {
           document.getElementById('callStatus').textContent = name + ' aranıyor...';
           socket.emit('call:start', { receiverUserId: userId });
-        });
+        };
+        if (socket.connected) startUser(); else socket.once('connect', startUser);
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 
@@ -252,12 +324,13 @@
       try {
         if (!await setupCall(name)) return;
         const pos = await getPos();
-        socket.on('connect', () => {
+        const startFlat = () => {
           document.getElementById('callStatus').textContent = name + ' çalınıyor...';
           const payload = { apartmentId, source: 'qr' };
           if (pos) { payload.lat = pos.lat; payload.lng = pos.lng; }
           socket.emit('call:start-flat', payload);
-        });
+        };
+        if (socket.connected) startFlat(); else socket.once('connect', startFlat);
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 

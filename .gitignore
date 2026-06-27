@@ -5,3 +5,8 @@ dist/
 .DS_Store
 firebase-admin.json
 firebase-admin.json
+
+# Yüklenen dosyalar
+uploads/
+*.bak
+*.bak-*

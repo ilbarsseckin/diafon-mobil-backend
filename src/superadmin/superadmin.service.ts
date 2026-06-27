@@ -57,6 +57,28 @@ export class SuperadminService {
     };
   }
 
+  // Bir owner'in tum aboneliklerini ucretsiz (sinirsiz aktif) yap / geri al
+  async setFree(ownerId: string, free: boolean) {
+    if (!ownerId) return { success: false, message: 'ownerId gerekli' };
+    if (free) {
+      const farFuture = new Date('2099-12-31');
+      await this.prisma.subscription.updateMany({
+        where: { ownerUserId: ownerId },
+        data: { status: 'active', monthlyPrice: 0, currentPeriodEnd: farFuture, trialEndsAt: farFuture },
+      });
+      await this.prisma.user.update({ where: { id: ownerId }, data: { isPremium: true } });
+      return { success: true, message: 'Hesap ucretsiz (sinirsiz) yapildi' };
+    } else {
+      // Geri al: trial'a dondur (14 gun)
+      const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      await this.prisma.subscription.updateMany({
+        where: { ownerUserId: ownerId },
+        data: { status: 'trial', trialEndsAt: trialEnd, currentPeriodEnd: trialEnd },
+      });
+      return { success: true, message: 'Ucretsizlik kaldirildi' };
+    }
+  }
+
   // Tum musteriler (yoneticiler) + metrikleri
   async customers() {
     // Bina sahibi olan tum kullanicilar = musteriler
@@ -90,12 +112,14 @@ export class SuperadminService {
       // Site adi (varsa) yoksa ilk bina adi
       const siteName = ownerBuildings.find(b => b.siteName)?.siteName || ownerBuildings[0]?.buildingName || 'Bilinmeyen';
 
+      const isFree = ownerSubs.length > 0 && ownerSubs.every(s => s.status === 'active' && s.monthlyPrice === 0);
       customers.push({
         id: owner.id,
         name: siteName,
         owner: owner.name,
         phone: owner.phone,
         status,
+        isFree,
         buildings: ownerBuildings.length,
         flats: flatCount,
         residents: residentCount,

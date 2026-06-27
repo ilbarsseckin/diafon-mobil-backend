@@ -130,7 +130,7 @@
       if (siteData) {
         html += '<button class="back-btn" onclick="renderBlocks(siteData)">‹ Bloklara dön</button>';
       }
-      html += '<div class="building"><h2>' + data.building.buildingName + '</h2>';
+      html += '<div class="building">'; if (data.building.imageUrl) { html += '<img src="' + (data.building.imageUrl.startsWith('http') ? data.building.imageUrl : 'https://mobildiafon.com' + data.building.imageUrl) + '" style="width:100%;max-height:160px;object-fit:cover;border-radius:12px;margin-bottom:10px;">'; } html += '<h2>' + data.building.buildingName + '</h2>';
       if (data.building.address) html += '<p>' + data.building.address + '</p>';
       if (flatParam) html += '<p>Daire ' + flatParam + '</p>';
       html += '</div>';
@@ -155,7 +155,7 @@
       const flats = {};
       residents.forEach(r => {
         const key = r.apartmentId || r.flatNo;
-        if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, people: [] };
+        if (!flats[key]) flats[key] = { apartmentId: r.apartmentId, flatNo: r.flatNo, floor: r.floor, listingStatus: r.listingStatus, people: [] };
         flats[key].people.push(r);
       });
 
@@ -173,7 +173,7 @@
           ? '<img src="' + (firstPhoto.startsWith('http') ? firstPhoto : 'https://mobildiafon.com' + firstPhoto) + '" style="width:46px;height:46px;border-radius:50%;object-fit:cover;margin-right:12px;">'
           : '<div style="width:46px;height:46px;border-radius:50%;background:#f0e0e2;display:flex;align-items:center;justify-content:center;margin-right:12px;font-size:20px;">🏠</div>';
         html += '<div class="item">' + photoHtml + '<div class="info">'
-          + '<div class="name">Daire ' + (f.flatNo || '-') + (nameLabel ? ': ' + nameLabel : '') + '</div>'
+          + '<div class="name">Daire ' + (f.flatNo || '-') + (nameLabel ? ': ' + nameLabel : '') + (f.listingStatus === 'sale' ? ' <span style="font-size:11px;font-weight:700;color:#c2691a;background:#fff0e0;padding:2px 8px;border-radius:10px;margin-left:6px;">Satilik</span>' : f.listingStatus === 'rent' ? ' <span style="font-size:11px;font-weight:700;color:#1a5fc2;background:#e3f0ff;padding:2px 8px;border-radius:10px;margin-left:6px;">Kiralik</span>' : '') + '</div>'
           + '<div class="sub">' + count + ' kişi' + (f.floor ? ' • Kat ' + f.floor : '') + '</div></div>'
           + '<button onclick="callFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')">Ara</button></div>';
       });
@@ -237,13 +237,26 @@
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }
 
+    function getPos() {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve(null); return; }
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          () => resolve(null),
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      });
+    }
     async function callFlat(apartmentId, name) {
       currentPeerId = null;
       try {
         if (!await setupCall(name)) return;
+        const pos = await getPos();
         socket.on('connect', () => {
           document.getElementById('callStatus').textContent = name + ' çalınıyor...';
-          socket.emit('call:start-flat', { apartmentId });
+          const payload = { apartmentId, source: 'qr' };
+          if (pos) { payload.lat = pos.lat; payload.lng = pos.lng; }
+          socket.emit('call:start-flat', payload);
         });
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }
     }

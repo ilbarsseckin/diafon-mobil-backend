@@ -28,6 +28,14 @@ export class SuperadminController {
     return this.service.customers();
   }
 
+  @Post('set-free')
+  async setFree(@Headers('authorization') auth: string, @Body() body: { ownerId: string; free: boolean }) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) return { success: false, message: 'Yetkisiz' };
+    return this.service.setFree(body.ownerId, body.free);
+  }
+
   @Get('overview')
   async overview(@Headers('authorization') auth: string) {
     const token = (auth || '').replace('Bearer ', '');

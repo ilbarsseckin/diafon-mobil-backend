@@ -13,6 +13,19 @@ function pricePerFlat(count: number): number {
 export class SubscriptionService {
   constructor(private prisma: PrismaService) {}
 
+  // Birim sayisina gore plan tablosundan aylik fiyat bul
+  private async planPriceForUnits(unitCount: number): Promise<number> {
+    const plan = await this.prisma.plan.findFirst({
+      where: {
+        isActive: true,
+        minUnits: { lte: unitCount },
+        OR: [{ maxUnits: null }, { maxUnits: { gte: unitCount } }],
+      },
+      orderBy: { minUnits: 'desc' },
+    });
+    return plan?.monthlyPrice ?? 0;
+  }
+
   // Kalan gun hesabi
   private daysLeft(end: Date | null): number {
     if (!end) return 0;
@@ -43,6 +56,8 @@ export class SubscriptionService {
 
     const result: any[] = [];
     for (const g of groups.values()) {
+      // Plan tablosundan aylik fiyat (birim sayisina gore)
+      const planPrice = await this.planPriceForUnits(g.flatCount || 1);
       // Mevcut abonelik kaydi var mi?
       let sub = await this.prisma.subscription.findFirst({
         where: { ownerUserId: userId, scopeType: g.scopeType, scopeName: g.scopeName },
@@ -58,7 +73,7 @@ export class SubscriptionService {
             scopeName: g.scopeName,
             status: 'trial',
             flatCount: g.flatCount,
-            monthlyPrice: g.scopeType === 'individual' ? 49 : g.flatCount * pricePerFlat(g.flatCount),
+            monthlyPrice: planPrice,
             trialEndsAt: trialEnd,
             currentPeriodEnd: trialEnd,
           },
@@ -69,7 +84,7 @@ export class SubscriptionService {
           where: { id: sub.id },
           data: {
             flatCount: g.flatCount,
-            monthlyPrice: g.scopeType === 'individual' ? 49 : g.flatCount * pricePerFlat(g.flatCount),
+            monthlyPrice: planPrice,
           },
         });
       }
@@ -87,6 +102,7 @@ export class SubscriptionService {
         id: sub.id,
         label: g.label,
         scopeType: g.scopeType,
+        scopeName: g.scopeName,
         status,
         flatCount: g.flatCount,
         monthlyPrice: sub.monthlyPrice,

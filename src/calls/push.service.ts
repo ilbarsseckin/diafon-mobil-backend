@@ -1,16 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as admin from 'firebase-admin';
 import { PrismaService } from '../prisma/prisma.service';
-
 @Injectable()
 export class PushService {
   private logger = new Logger('PushService');
   private initialized = false;
-
   constructor(private prisma: PrismaService) {
     this.initFirebase();
   }
-
   private initFirebase() {
     try {
       if (admin.apps.length === 0) {
@@ -25,29 +22,20 @@ export class PushService {
       this.logger.error('Firebase Admin baslatilamadi: ' + e.message);
     }
   }
-
   // Gelen çağrı bildirimi - DATA mesajı (arka planda CallKit tetikler)
   async sendIncomingCall(receiverUserId: string, callerName: string, callId: string, callerUserId: string, callerPhotoUrl?: string, buildingId?: string) {
     if (!this.initialized) return;
-
     const user = await this.prisma.user.findUnique({
       where: { id: receiverUserId },
       select: { fcmToken: true },
     });
-
     if (!user?.fcmToken) {
       this.logger.warn(`Kullanicinin FCM token yok: ${receiverUserId}`);
       return;
     }
-
     try {
       await admin.messaging().send({
         token: user.fcmToken,
-        // notification + data: olu uygulamaya da bildirim ulassin
-        notification: {
-          title: 'Gelen Arama',
-          body: `${callerName} sizi ariyor`,
-        },
         data: {
           type: 'incoming_call',
           callId: callId,
@@ -58,13 +46,7 @@ export class PushService {
         },
         android: {
           priority: 'high',
-          ttl: 0,
-          notification: {
-            channelId: 'incoming_calls',
-            priority: 'max',
-            sound: 'default',
-            visibility: 'public',
-          },
+          ttl: 60000,
         },
       });
       this.logger.log(`Push (data) gonderildi: ${receiverUserId}`);
@@ -72,7 +54,6 @@ export class PushService {
       this.logger.error('Push gonderilemedi: ' + e.message);
     }
   }
-
   // Not bildirimi - GORUNUR notification (kargonuz geldi vb.)
   async sendNoteNotification(receiverUserIds: string[], title: string, body: string) {
     if (!this.initialized) return;
@@ -95,7 +76,6 @@ export class PushService {
     }
     this.logger.log(`Not push gonderildi: ${users.length} kullanici`);
   }
-
   // Cagri iptal - CallKit kapatma push'u (data-only)
   async sendCallCancelled(receiverUserId: string, callId: string) {
     if (!this.initialized) return;

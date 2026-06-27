@@ -49,7 +49,7 @@ export class BuildingsService {
   async findByLocation(lat: number, lng: number) {
     const rows = await this.prisma.$queryRaw<any[]>`
       SELECT
-        id, building_name, address, latitude, longitude, radius_meter,
+        id, building_name, address, site_name, block_name, latitude, longitude, radius_meter,
         ST_Distance(
           ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
           ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
@@ -83,8 +83,31 @@ export class BuildingsService {
       },
     });
 
+    let blocks: any[] = [];
+    if (b.site_name) {
+      const siblings = await this.prisma.building.findMany({
+        where: { siteName: b.site_name },
+        select: { id: true, buildingName: true, blockName: true, qrToken: true },
+        orderBy: { blockName: 'asc' },
+      });
+      for (const blk of siblings) {
+        const cnt = await this.prisma.resident.count({
+          where: { approved: true, visible: true, user: { blocked: false }, apartment: { buildingId: blk.id } },
+        });
+        blocks.push({
+          buildingId: blk.id,
+          buildingName: blk.buildingName,
+          blockName: blk.blockName,
+          qrToken: blk.qrToken,
+          residentCount: cnt,
+        });
+      }
+    }
     return {
       found: true,
+      isSite: !!b.site_name,
+      siteName: b.site_name || null,
+      blocks,
       building: {
         id: b.id,
         buildingName: b.building_name,
@@ -163,7 +186,7 @@ export class BuildingsService {
     });
     if (!apartment) {
       apartment = await this.prisma.apartment.create({
-        data: { buildingId, flatNo: dto.flatNo, floor: dto.floor },
+        data: { buildingId, flatNo: dto.flatNo, floor: dto.floor, qrToken: require('crypto').randomBytes(16).toString('hex') },
       });
     }
 
@@ -247,11 +270,35 @@ export class BuildingsService {
       }
     }
 
+    // Bu binanin sahibine ait guvenlik gorevlileri (sadece uygulamaya kayitli/aranabilir olanlar)
+    const guardRecords = building.ownerUserId
+      ? await this.prisma.securityGuard.findMany({
+          where: { ownerUserId: building.ownerUserId },
+        })
+      : [];
+    const guardPhones = guardRecords.map(g => g.phone);
+    const guardUsers = guardPhones.length
+      ? await this.prisma.user.findMany({
+          where: { phone: { in: guardPhones }, blocked: false },
+          select: { id: true, name: true, phone: true, photoUrl: true, isOnline: true },
+        })
+      : [];
+    const guards = guardUsers.map(u => {
+      const rec = guardRecords.find(g => g.phone === u.phone);
+      return {
+        userId: u.id,
+        name: rec?.guardName || u.name || 'Guvenlik',
+        photoUrl: u.photoUrl,
+        isOnline: u.isOnline,
+      };
+    });
+
     return {
       found: true,
       isSite: !!building.siteName,
       siteName: building.siteName || null,
       blocks,
+      guards,
       building: {
         id: building.id,
         buildingName: building.buildingName,
@@ -314,6 +361,59 @@ export class BuildingsService {
       flatNo,
     };
   }
+  // Web'den public katilim: telefon ile kullanici olustur/bul, daireye onaysiz bagla
+  async webJoin(dto: { buildingId: string; flatNo: string; name?: string; phone: string }) {
+    const phone = dto.phone.replace(/\s/g, '');
+    if (!/^0?5\d{9}$/.test(phone)) {
+      return { success: false, message: 'Geçerli bir telefon numarası girin.' };
+    }
+    const building = await this.prisma.building.findUnique({ where: { id: dto.buildingId } });
+    if (!building) {
+      return { success: false, message: 'Bina bulunamadı.' };
+    }
+    // Daire var mi, yoksa olustur
+    let apartment = await this.prisma.apartment.findFirst({
+      where: { buildingId: building.id, flatNo: dto.flatNo },
+    });
+    if (!apartment) {
+      apartment = await this.prisma.apartment.create({
+        data: { buildingId: building.id, flatNo: dto.flatNo, qrToken: require('crypto').randomBytes(16).toString('hex') },
+      });
+    }
+    // Telefonla kullanici bul/olustur
+    let user = await this.prisma.user.findUnique({ where: { phone } });
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          name: dto.name?.trim() || 'Sakin',
+          phone,
+          role: 'GUEST',
+          phoneVerified: false,
+        },
+      });
+    }
+    // Zaten kayitli mi?
+    const existing = await this.prisma.resident.findFirst({
+      where: { userId: user.id, apartmentId: apartment.id },
+    });
+    if (existing) {
+      return {
+        success: true,
+        alreadyExists: true,
+        message: 'Bu daireye zaten kayıtlısınız. Uygulamadan telefonunuzla giriş yapabilirsiniz.',
+      };
+    }
+    // Onay bekleyen sakin olarak ekle
+    await this.prisma.resident.create({
+      data: { userId: user.id, apartmentId: apartment.id, visible: true, approved: false },
+    });
+    return {
+      success: true,
+      message: building.buildingName + ' yöneticisine katılım isteğiniz iletildi.',
+      building: { id: building.id, buildingName: building.buildingName },
+    };
+  }
+
 
   /**
    * Bir konuma yakin TUM binalari listele (cift bina onleme icin).
@@ -429,9 +529,9 @@ export class BuildingsService {
       });
 
       // Daireleri uret (1..count)
-      const apartmentData: { buildingId: string; flatNo: string }[] = [];
+      const apartmentData: { buildingId: string; flatNo: string; qrToken: string }[] = [];
       for (let i = 1; i <= count; i++) {
-        apartmentData.push({ buildingId: building.id, flatNo: String(i) });
+        apartmentData.push({ buildingId: building.id, flatNo: String(i), qrToken: require('crypto').randomBytes(16).toString('hex') });
       }
       await this.prisma.apartment.createMany({ data: apartmentData });
 
@@ -448,6 +548,7 @@ export class BuildingsService {
     latitude: number;
     longitude: number;
     address?: string;
+    unitCount?: number;
   }) {
     if (!dto.businessName?.trim()) {
       return { success: false, message: 'Isletme adi gerekli' };
@@ -473,14 +574,20 @@ export class BuildingsService {
         businessCategory: dto.category || null,
       },
     });
-    // Tek birim (daire)
-    const apartment = await this.prisma.apartment.create({
-      data: { buildingId: building.id, flatNo: '1' },
-    });
-    // Sahibi otomatik onayli sakin (cagriyi o alir)
-    await this.prisma.resident.create({
-      data: { userId, apartmentId: apartment.id, approved: true, visible: true },
-    });
-    return { success: true, building: { id: building.id, buildingName: dto.businessName.trim(), qrToken: token, apartmentId: apartment.id } };
+    // Birim sayisi kadar daire/birim olustur
+    const count = Math.max(1, dto.unitCount || 1);
+    const apartmentData: { buildingId: string; flatNo: string; qrToken: string }[] = [];
+    for (let i = 1; i <= count; i++) {
+      apartmentData.push({ buildingId: building.id, flatNo: String(i), qrToken: require('crypto').randomBytes(16).toString('hex') });
+    }
+    await this.prisma.apartment.createMany({ data: apartmentData });
+    const apartment = await this.prisma.apartment.findFirst({ where: { buildingId: building.id }, orderBy: { flatNo: 'asc' } });
+    // Sahibi ilk birime otomatik onayli sakin (cagriyi o alir)
+    if (apartment) {
+      await this.prisma.resident.create({
+        data: { userId, apartmentId: apartment.id, approved: true, visible: true },
+      });
+    }
+    return { success: true, building: { id: building.id, buildingName: dto.businessName.trim(), qrToken: token, apartmentId: apartment?.id } };
   }
 }
