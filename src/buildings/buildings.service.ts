@@ -495,15 +495,41 @@ export class BuildingsService {
     latitude: number;
     longitude: number;
     blocks: { blockName?: string; flatCount: number }[];
+    ownerFlatNo?: string;
+    ownerBlockName?: string;
   }) {
-    // Premium kontrol
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
-    if (!user?.isPremium) {
-      return { success: false, message: 'Yapı kurmak için premium üyelik gerekli' };
-    }
     if (!dto.blocks || dto.blocks.length === 0) {
       return { success: false, message: 'En az bir blok girin' };
     }
+    // AYNI ISIM + YAKIN KONUM KONTROLU (mukerrer apartman engeli)
+    // Yaklasik 50m yaricapta ayni isimli apartman varsa engelle
+    const normalize = (s: string) => (s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+    const yakinlik = 0.00045; // ~50 metre (enlem/boylam derece yaklasigi)
+    const yakinBinalar = await this.prisma.building.findMany({
+      where: {
+        type: { not: 'business' },
+        latitude: { gte: dto.latitude - yakinlik, lte: dto.latitude + yakinlik },
+        longitude: { gte: dto.longitude - yakinlik, lte: dto.longitude + yakinlik },
+      },
+      select: { buildingName: true, siteName: true },
+    });
+    for (const block of dto.blocks) {
+      let yeniAd = dto.siteName || block.blockName || 'Bina';
+      if (dto.siteName && block.blockName) yeniAd = `${dto.siteName} ${block.blockName}`;
+      else if (block.blockName) yeniAd = block.blockName;
+      const yeniAdNorm = normalize(yeniAd);
+      const siteNorm = normalize(dto.siteName || '');
+      const cakisma = yakinBinalar.some((b) => {
+        const bAd = normalize(b.buildingName);
+        const bSite = normalize(b.siteName || '');
+        return bAd === yeniAdNorm || (siteNorm && bSite === siteNorm) || (siteNorm && bAd === siteNorm);
+      });
+      if (cakisma) {
+        return { success: false, message: `Bu konumda "${yeniAd}" adinda kayitli bir bina zaten var. Sakin olarak katilabilir veya isyeri ekleyebilirsiniz.` };
+      }
+    }
+    // Yapi kuran kisi otomatik yonetici/premium olur (isletme ile tutarli)
+    await this.prisma.user.update({ where: { id: userId }, data: { isPremium: true } });
 
     const createdBuildings: any[] = [];
     for (const block of dto.blocks) {

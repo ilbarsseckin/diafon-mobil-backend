@@ -21,6 +21,7 @@ model User {
   blocked       Boolean    @default(false)
   createdAt     DateTime   @default(now()) @map("created_at")
   isPremium     Boolean    @default(false) @map("is_premium")
+  deletionRequestedAt DateTime? @map("deletion_requested_at")
   callerCalls   Call[]     @relation("CallerUser")
   receiverCalls Call[]     @relation("ReceiverUser")
   residents     Resident[]

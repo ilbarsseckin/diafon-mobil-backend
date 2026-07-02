@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health/health.controller';
 import { AuthModule } from './auth/auth.module';
@@ -13,10 +14,12 @@ import { PlansModule } from './plans/plans.module';
 import { MailModule } from './mail/mail.module';
 import { SmsModule } from './sms/sms.module';
 import { PaymentModule } from './payment/payment.module';
+import { AccountCleanupService } from './tasks/account-cleanup.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     BuildingsModule,
@@ -31,6 +34,6 @@ import { PaymentModule } from './payment/payment.module';
     PlansModule,
   ],
   controllers: [HealthController],
-  providers: [],
+  providers: [AccountCleanupService],
 })
 export class AppModule {}

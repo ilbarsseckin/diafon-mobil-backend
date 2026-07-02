@@ -76,6 +76,29 @@ export class PushService {
     }
     this.logger.log(`Not push gonderildi: ${users.length} kullanici`);
   }
+  // Zil bildirimi - gorunur + ses (ziyaretci daireye zil caldi)
+  async sendDoorbell(receiverUserIds: string[], visitorName: string, buildingName: string, sound?: string) {
+    if (!this.initialized) return;
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: receiverUserIds }, fcmToken: { not: null } },
+      select: { fcmToken: true },
+    });
+    const ringSound = (sound && sound.trim()) ? sound.trim() : 'tone1';
+    for (const u of users) {
+      if (!u.fcmToken) continue;
+      try {
+        await admin.messaging().send({
+          token: u.fcmToken,
+          notification: { title: '🔔 Kapida ziyaretci var', body: `${visitorName} zil caldi` },
+          data: { type: 'doorbell', visitorName, buildingName },
+          android: { priority: 'high', notification: { sound: ringSound, channelId: 'doorbell' } },
+        });
+      } catch (e) {
+        this.logger.error('Zil push gonderilemedi: ' + e.message);
+      }
+    }
+    this.logger.log(`Zil push gonderildi: ${users.length} kullanici`);
+  }
   // Cagri iptal - CallKit kapatma push'u (data-only)
   async sendCallCancelled(receiverUserId: string, callId: string) {
     if (!this.initialized) return;

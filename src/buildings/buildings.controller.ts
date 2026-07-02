@@ -573,6 +573,20 @@ export class BuildingsController {
     return { success: true, url };
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('update-name')
+  async updateBuildingName(@Req() req: any, @Body() body: { buildingId: string; buildingName?: string; siteName?: string }) {
+    const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
+    if (!building) return { success: false, message: 'Bina bulunamadi' };
+    if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
+    const name = (body.buildingName || '').trim();
+    if (!name) return { success: false, message: 'Bina adi bos olamaz' };
+    const data: any = { buildingName: name };
+    if (body.siteName !== undefined) data.siteName = (body.siteName || '').trim() || null;
+    await this.prisma.building.update({ where: { id: body.buildingId }, data });
+    return { success: true, buildingName: name };
+  }
+
   // --- YONETICI: konum dogrulama ac/kapa + mesafe ---
   @UseGuards(JwtAuthGuard)
   @Post('set-location-check')

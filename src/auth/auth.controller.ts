@@ -94,4 +94,46 @@ export class AuthController {
     );
     return { success: true, token, guestId, buildingName: building.buildingName };
   }
+
+  // --- Uyelik sil: sakin ise hemen, yonetici (bina sahibi) ise 30 gun sonra ---
+  @UseGuards(JwtAuthGuard)
+  @Post('delete-account')
+  async deleteAccount(@Req() req: any) {
+    const userId = req.user.userId;
+    const ownedBuildings = await this.prisma.building.findMany({ where: { ownerUserId: userId }, select: { id: true } });
+    if (ownedBuildings.length === 0) {
+      // Sakin: hemen sil
+      await this.prisma.call.deleteMany({ where: { OR: [{ callerUserId: userId }, { receiverUserId: userId }] } });
+      await this.prisma.doorLog.deleteMany({ where: { userId } });
+      await this.prisma.user.delete({ where: { id: userId } });
+      return { success: true, immediate: true, message: 'Hesabiniz silindi' };
+    }
+    // Yonetici: 30 gun sonraya isaretle
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { deletionRequestedAt: new Date() },
+    });
+    return { success: true, immediate: false, message: 'Hesabiniz 30 gun sonra silinecek. Bu sure icinde istediginiz zaman iptal edebilirsiniz.' };
+  }
+
+  // --- Uyelik silme talebini iptal et (30 gun dolmadan) ---
+  @UseGuards(JwtAuthGuard)
+  @Post('cancel-deletion')
+  async cancelDeletion(@Req() req: any) {
+    await this.prisma.user.update({
+      where: { id: req.user.userId },
+      data: { deletionRequestedAt: null },
+    });
+    return { success: true, message: 'Hesap silme talebi iptal edildi' };
+  }
+
+  // --- Silme durumu sorgula (mobilde gostermek icin) ---
+  @UseGuards(JwtAuthGuard)
+  @Get('deletion-status')
+  async deletionStatus(@Req() req: any) {
+    const user = await this.prisma.user.findUnique({ where: { id: req.user.userId }, select: { deletionRequestedAt: true } });
+    if (!user?.deletionRequestedAt) return { pending: false };
+    const daysLeft = 30 - Math.floor((Date.now() - user.deletionRequestedAt.getTime()) / (1000 * 60 * 60 * 24));
+    return { pending: true, daysLeft: Math.max(0, daysLeft) };
+  }
 }
