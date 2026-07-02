@@ -76,6 +76,31 @@ export class PushService {
     }
     this.logger.log(`Not push gonderildi: ${users.length} kullanici`);
   }
+
+  // Toplu duyuru/reklam push (superadmin) - tum kullanicilara veya sadece verilen id'lere
+  async sendBroadcast(title: string, body: string, userIds?: string[]) {
+    if (!this.initialized) return { sent: 0 };
+    const where: any = { fcmToken: { not: null } };
+    if (userIds && userIds.length > 0) where.id = { in: userIds };
+    const users = await this.prisma.user.findMany({ where, select: { fcmToken: true } });
+    let sent = 0;
+    for (const u of users) {
+      if (!u.fcmToken) continue;
+      try {
+        await admin.messaging().send({
+          token: u.fcmToken,
+          notification: { title, body },
+          data: { type: 'broadcast' },
+          android: { priority: 'high', notification: { sound: 'default' } },
+        });
+        sent++;
+      } catch (e) {
+        this.logger.error('Duyuru push gonderilemedi: ' + e.message);
+      }
+    }
+    this.logger.log(`Duyuru push gonderildi: ${sent} kullanici`);
+    return { sent };
+  }
   // Zil bildirimi - gorunur + ses (ziyaretci daireye zil caldi)
   async sendDoorbell(receiverUserIds: string[], visitorName: string, buildingName: string, sound?: string) {
     if (!this.initialized) return;

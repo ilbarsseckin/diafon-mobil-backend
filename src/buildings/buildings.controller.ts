@@ -162,6 +162,8 @@ export class BuildingsController {
         siteName: apt.building.siteName,
         blockName: apt.building.blockName,
         imageUrl: apt.building.imageUrl,
+        latitude: apt.building.latitude,
+        longitude: apt.building.longitude,
         residents: others.map((o) => ({
           userId: o.user.id,
           name: o.user.name,
