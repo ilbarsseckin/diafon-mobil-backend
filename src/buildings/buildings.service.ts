@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBuildingDto } from './dto/building.dto';
 
@@ -39,6 +39,19 @@ export class BuildingsService {
     await this.findOne(id);
     await this.prisma.building.delete({ where: { id } });
     return { message: 'Bina silindi' };
+  }
+  // Bina sahibi bina adi/adres/site/kategori bilgisini duzenler
+  async updateBuildingInfo(id: string, userId: string, data: { buildingName?: string; address?: string; siteName?: string; businessCategory?: string }) {
+    const building = await this.prisma.building.findUnique({ where: { id } });
+    if (!building) throw new NotFoundException('Bina bulunamadi');
+    if (building.ownerUserId !== userId) throw new BadRequestException('Bu binayi duzenleme yetkiniz yok');
+    const patch: any = {};
+    if (data.buildingName !== undefined && data.buildingName.trim()) patch.buildingName = data.buildingName.trim();
+    if (data.address !== undefined) patch.address = data.address.trim() || null;
+    if (data.siteName !== undefined) patch.siteName = data.siteName.trim() || null;
+    if (data.businessCategory !== undefined) patch.businessCategory = data.businessCategory.trim() || null;
+    const updated = await this.prisma.building.update({ where: { id }, data: patch });
+    return { message: 'Bina bilgileri guncellendi', building: updated };
   }
 
   /**
@@ -504,7 +517,7 @@ export class BuildingsService {
     // AYNI ISIM + YAKIN KONUM KONTROLU (mukerrer apartman engeli)
     // Yaklasik 50m yaricapta ayni isimli apartman varsa engelle
     const normalize = (s: string) => (s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
-    const yakinlik = 0.00045; // ~50 metre (enlem/boylam derece yaklasigi)
+    const yakinlik = 0.0027; // ~300 metre (ayni isimli mukerrer bina engeli)
     const yakinBinalar = await this.prisma.building.findMany({
       where: {
         type: { not: 'business' },

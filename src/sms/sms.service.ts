@@ -10,7 +10,7 @@ export class SmsService {
 
   async send(phone: string, message: string): Promise<boolean> {
     const gsm = phone.replace(/^\+/, '').replace(/^0/, '90');
-    const path = `/api/sms/send/get/?usercode=${this.username}&password=${this.password}&gsmno=${gsm}&message=${encodeURIComponent(message)}&msgheader=${this.header}`;
+    const path = `/sms/send/get/?usercode=${this.username}&password=${this.password}&gsmno=${gsm}&message=${encodeURIComponent(message)}&msgheader=${this.header}`;
 
     return new Promise((resolve) => {
       const options = {

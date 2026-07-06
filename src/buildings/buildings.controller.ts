@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, BadRequestException, Req } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, BadRequestException, Req } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { BuildingsService } from './buildings.service';
 import { PushService } from '../calls/push.service';
@@ -155,10 +155,15 @@ export class BuildingsController {
         }));
       homes.push({
         apartmentId: apt.id,
+        residentId: mr.id,
+        isOwner: apt.building.ownerUserId === req.user.userId,
         flatNo: apt.flatNo,
         floor: apt.floor,
         buildingId: apt.building.id,
         buildingName: apt.building.buildingName,
+        address: apt.building.address,
+        businessCategory: apt.building.businessCategory,
+        type: apt.building.type,
         siteName: apt.building.siteName,
         blockName: apt.building.blockName,
         imageUrl: apt.building.imageUrl,
@@ -902,5 +907,16 @@ export class BuildingsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.service.remove(id);
+  }
+
+  // Bina sahibi kendi binasinin bilgilerini duzenler
+  @UseGuards(JwtAuthGuard)
+  @Patch(':id/info')
+  updateInfo(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body: { buildingName?: string; address?: string; siteName?: string; businessCategory?: string },
+  ) {
+    return this.service.updateBuildingInfo(id, req.user.userId, body);
   }
 }

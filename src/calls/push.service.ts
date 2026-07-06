@@ -112,12 +112,12 @@ export class PushService {
     for (const u of users) {
       if (!u.fcmToken) continue;
       try {
-        await admin.messaging().send({
+        const msgId = await admin.messaging().send({
           token: u.fcmToken,
-          notification: { title: '🔔 Kapida ziyaretci var', body: `${visitorName} zil caldi` },
           data: { type: 'doorbell', visitorName, buildingName },
-          android: { priority: 'high', notification: { sound: ringSound, channelId: 'doorbell' } },
+          android: { priority: 'high' },
         });
+        this.logger.log('Zil FCM mesaj ID: ' + msgId);
       } catch (e) {
         this.logger.error('Zil push gonderilemedi: ' + e.message);
       }

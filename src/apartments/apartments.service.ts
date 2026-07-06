@@ -59,4 +59,17 @@ export class ApartmentsService {
     await this.prisma.resident.delete({ where: { id: residentId } });
     return { message: 'Sakin kaydı silindi' };
   }
+  // Kullanici kendi resident kaydini siler (binadan ayrilir)
+  async leaveBuilding(userId: string, residentId: string) {
+    const resident = await this.prisma.resident.findUnique({ where: { id: residentId } });
+    if (!resident) throw new NotFoundException('Kayit bulunamadi');
+    if (resident.userId !== userId) throw new BadRequestException('Bu kaydi silme yetkiniz yok');
+    await this.prisma.resident.delete({ where: { id: residentId } });
+    // Kullanicinin baska resident kaydi kalmadiysa rolu GUEST'e dusur
+    const remaining = await this.prisma.resident.count({ where: { userId } });
+    if (remaining === 0) {
+      await this.prisma.user.update({ where: { id: userId }, data: { role: 'GUEST' } });
+    }
+    return { message: 'Binadan ayrildiniz' };
+  }
 }

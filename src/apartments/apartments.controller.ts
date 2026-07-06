@@ -47,6 +47,13 @@ export class ApartmentsController {
     return this.service.setVisibility(id, dto.visible);
   }
 
+  // --- Sakin kendi kaydini siler (binadan ayrilir) ---
+  @UseGuards(JwtAuthGuard)
+  @Delete('residents/:id/leave')
+  leave(@Param('id') id: string, @Req() req: any) {
+    return this.service.leaveBuilding(req.user.userId, id);
+  }
+
   // --- Kullanici TUM dairelerinde gorunur/gorunmez olur (hayalet mod) ---
   @UseGuards(JwtAuthGuard)
   @Post('me/visibility')

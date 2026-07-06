@@ -7,43 +7,51 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f6fa; color: #1a2233; -webkit-font-smoothing: antialiased; }
-    .wrap { max-width: 560px; margin: 0 auto; min-height: 100vh; background: #f4f6fa; }
-    .header { background: linear-gradient(135deg, #E63946 0%, #c1121f 100%); color: white; padding: 26px 20px 30px; text-align: center; border-radius: 0 0 24px 24px; box-shadow: 0 4px 20px rgba(230,57,70,0.25); }
-    .header .logo { height: auto; max-height: 56px; max-width: 220px; width: auto; margin: 0 auto 10px; display: block; background: #fff; padding: 10px 16px; border-radius: 12px; object-fit: contain; }
-    .header .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
-    .header .slogan { font-size: 13.5px; opacity: 0.92; margin-top: 4px; font-weight: 500; }
-    .header .trust { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; background: rgba(255,255,255,0.18); padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-    .steps { display: flex; justify-content: center; gap: 8px; padding: 16px 12px 4px; flex-wrap: wrap; }
-    .step { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; background: #fff; padding: 7px 12px; border-radius: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .step b { background: #E63946; color: #fff; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
-    .building { padding: 18px; background: white; margin: 14px 12px 8px; border-radius: 16px; box-shadow: 0 2px 12px rgba(20,33,61,0.06); }
-    .building h2 { font-size: 19px; color: #1a2233; font-weight: 800; }
-    .building p { color: #6b7280; font-size: 14px; margin-top: 4px; }
-    .item { display: flex; align-items: center; padding: 14px 16px; background: white; margin: 8px 12px; border-radius: 14px; box-shadow: 0 2px 10px rgba(20,33,61,0.05); transition: transform .12s, box-shadow .12s; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f2f4f8; color: #1a1a2e; min-height: 100vh; }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 0 14px 30px; }
+    .header { text-align: center; padding: 26px 0 14px; }
+    .header .logo { height: 42px; }
+    .header .brand { font-size: 22px; font-weight: 800; color: #1B2A4A; }
+    .header .slogan { font-size: 13px; color: #5a6478; margin-top: 4px; }
+    .header .trust { display: inline-block; margin-top: 8px; font-size: 11.5px; color: #1a8a4a; background: #e7f6ec; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
+    .steps { display: flex; justify-content: center; gap: 8px; margin: 10px 0 16px; }
+    .step { font-size: 11.5px; color: #5a6478; background: #fff; border: 1px solid #e6e9f0; padding: 6px 10px; border-radius: 18px; }
+    .step b { color: #E63946; margin-right: 3px; }
+    .searchbar { position: sticky; top: 8px; z-index: 20; margin: 0 0 14px; }
+    .searchbar input { width: 100%; padding: 14px 18px 14px 44px; border-radius: 16px; border: 1.5px solid #e2e6ee; background: #fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="%235a6478" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>') 15px center no-repeat; font-size: 15px; box-shadow: 0 4px 18px rgba(20,33,61,0.07); outline: none; }
+    .searchbar input:focus { border-color: #E63946; }
+    .no-result { text-align: center; color: #8a93a6; padding: 26px 10px; font-size: 14px; display: none; }
+    .building { background: linear-gradient(135deg, #1B2A4A 0%, #2a3f6e 100%); color: #fff; border-radius: 18px; padding: 18px; text-align: center; margin-bottom: 16px; box-shadow: 0 8px 24px rgba(20,33,61,0.18); }
+    .building img { width: 100%; max-height: 150px; object-fit: cover; border-radius: 12px; margin-bottom: 10px; }
+    .building h2 { font-size: 19px; font-weight: 800; }
+    .building p { font-size: 13px; opacity: 0.8; margin-top: 3px; }
+    .section-title { font-size: 11.5px; font-weight: 800; letter-spacing: 0.08em; color: #8a93a6; margin: 18px 4px 8px; }
+    .item { display: flex; align-items: center; background: #fff; border-radius: 16px; padding: 12px 12px; margin-bottom: 10px; box-shadow: 0 2px 10px rgba(20,33,61,0.06); border: 1px solid #eef0f5; transition: transform .1s; }
     .item:active { transform: scale(0.99); }
+    .item img { flex-shrink: 0; }
     .item .info { flex: 1; min-width: 0; }
-    .item .name { font-weight: 700; font-size: 15px; }
-    .item .sub { color: #9099a8; font-size: 13px; margin-top: 2px; }
-    .item button { background: #E63946; color: white; border: none; padding: 10px 20px; border-radius: 22px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 3px 10px rgba(230,57,70,0.3); transition: background .12s; }
+    .item .name { font-weight: 700; font-size: 15px; color: #14213D; overflow: hidden; text-overflow: ellipsis; }
+    .item .sub { font-size: 12.5px; color: #7a8398; margin-top: 2px; }
+    .item button { flex-shrink: 0; background: #E63946; color: white; border: none; padding: 11px 18px; border-radius: 14px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 3px 10px rgba(230,57,70,0.25); }
     .item button:active { background: #c1121f; }
-    .loading, .error { text-align: center; padding: 48px 24px; color: #9099a8; font-size: 15px; }
-    .section-title { padding: 16px 18px 6px; color: #9099a8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
-    .back-btn { display: inline-flex; align-items: center; gap: 6px; margin: 14px 12px 4px; padding: 9px 16px; background: white; border: none; border-radius: 22px; color: #E63946; font-weight: 700; cursor: pointer; box-shadow: 0 2px 8px rgba(20,33,61,0.06); }
-    .site-footer { margin: 24px 12px 16px; padding: 22px 18px; background: linear-gradient(135deg, #1a2233 0%, #2a3548 100%); border-radius: 18px; text-align: center; color: #fff; }
-    .site-footer .ttl { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-    .site-footer .txt { font-size: 13px; opacity: 0.8; margin-bottom: 14px; line-height: 1.5; }
-    .site-footer .cta { display: inline-block; background: #E63946; color: #fff; text-decoration: none; padding: 11px 24px; border-radius: 24px; font-size: 14px; font-weight: 700; box-shadow: 0 4px 14px rgba(230,57,70,0.35); }
-    .site-footer .link { display: block; margin-top: 14px; color: #aab3c5; font-size: 12px; text-decoration: none; }
-
-    #callScreen { display: none; position: fixed; inset: 0; background: #111; z-index: 100; flex-direction: column; }
-    #remoteVideo { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; background: #222; }
-    #localVideo { position: absolute; top: 16px; right: 16px; width: 100px; height: 140px; object-fit: cover; border-radius: 12px; border: 2px solid white; z-index: 2; background: #333; }
-    .call-info { position: absolute; top: 20px; left: 0; right: 0; text-align: center; color: white; z-index: 2; }
-    .call-info .peer-name { font-size: 20px; font-weight: bold; }
+    .item button.btn-ring { background: #fff4e5; color: #E8830C; box-shadow: none; border: 1.5px solid #f5d9b0; padding: 11px 13px; margin-right: 8px; font-size: 16px; }
+    .item button.btn-ring:active { background: #ffe9cc; }
+    .back-btn { background: none; border: none; color: #5a6478; font-size: 14px; font-weight: 600; cursor: pointer; padding: 8px 4px; margin-bottom: 6px; }
+    .loading, .error { text-align: center; padding: 44px 16px; color: #7a8398; font-size: 15px; }
+    .error { color: #c0392b; }
+    .site-footer { text-align: center; margin-top: 30px; background: #fff; border-radius: 18px; padding: 22px 16px; border: 1px solid #eef0f5; }
+    .site-footer .ttl { font-weight: 800; font-size: 15px; color: #14213D; }
+    .site-footer .txt { font-size: 12.5px; color: #7a8398; margin: 6px 0 12px; }
+    .site-footer .cta { display: inline-block; background: #E63946; color: #fff; padding: 10px 22px; border-radius: 14px; font-weight: 700; font-size: 14px; text-decoration: none; }
+    .site-footer .link { display: block; margin-top: 10px; font-size: 12px; color: #8a93a6; text-decoration: none; }
+    #callScreen { display: none; position: fixed; inset: 0; background: #0a0f1e; z-index: 100; }
+    #remoteVideo { width: 100%; height: 100%; object-fit: cover; }
+    #localVideo { position: absolute; top: 18px; right: 18px; width: 110px; height: 150px; object-fit: cover; border-radius: 14px; border: 2px solid rgba(255,255,255,0.35); z-index: 2; }
+    .call-info { position: absolute; top: 22px; left: 22px; color: #fff; z-index: 2; }
+    .call-info .peer-name { font-size: 21px; font-weight: 800; }
     .call-info .status { font-size: 14px; margin-top: 6px; opacity: 0.85; }
     .call-controls { position: absolute; bottom: 40px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; z-index: 2; }
-    .call-controls button { width: 60px; height: 60px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer; color: white; }
+    .call-controls button { width: 62px; height: 62px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer; color: white; }
     .btn-end { background: #E63946; }
     .btn-mute { background: rgba(255,255,255,0.2); }
   </style>
@@ -61,6 +69,10 @@
     <div class="step"><b>2</b> Ara</div>
     <div class="step"><b>3</b> Görüntülü görüş</div>
   </div>
+  <div class="searchbar" id="searchbar" style="display:none">
+    <input type="text" id="searchInput" placeholder="Daire no veya isim ara..." autocomplete="off">
+  </div>
+  <div class="no-result" id="noResult">Sonuç bulunamadı</div>
   <div id="content"><div class="loading">Yükleniyor...</div></div>
   <div class="site-footer">
     <div class="ttl">Siz de binanıza MobilDiafon kurun</div>
@@ -100,6 +112,38 @@
       ]
     };
 
+    // Canli arama filtresi - render edilen .item kartlarini metne gore gizle/goster
+    function initSearch() {
+      const inp = document.getElementById('searchInput');
+      const bar = document.getElementById('searchbar');
+      const noRes = document.getElementById('noResult');
+      if (!inp) return;
+      inp.addEventListener('input', () => {
+        const q = inp.value.trim().toLocaleLowerCase('tr');
+        const items = document.querySelectorAll('#content .item');
+        let visible = 0;
+        items.forEach(it => {
+          const txt = (it.textContent || '').toLocaleLowerCase('tr');
+          const show = !q || txt.includes(q);
+          it.style.display = show ? '' : 'none';
+          if (show) visible++;
+        });
+        // Bolum basliklarini da yonet: altinda gorunen kart yoksa gizle
+        document.querySelectorAll('#content .section-title').forEach(st => {
+          let el = st.nextElementSibling, any = false;
+          while (el && !el.classList.contains('section-title')) {
+            if (el.classList.contains('item') && el.style.display !== 'none') { any = true; break; }
+            el = el.nextElementSibling;
+          }
+          st.style.display = any ? '' : 'none';
+        });
+        noRes.style.display = (q && visible === 0) ? 'block' : 'none';
+      });
+    }
+    function showSearchbar() {
+      const bar = document.getElementById('searchbar');
+      if (bar) bar.style.display = '';
+    }
     async function load() {
       const content = document.getElementById('content');
       if (!token) { content.innerHTML = '<div class="error">Geçersiz bağlantı</div>'; return; }
@@ -133,6 +177,8 @@
     }
 
     function renderBlocks(data) {
+      const bar = document.getElementById('searchbar');
+      if (bar) bar.style.display = 'none';
       const content = document.getElementById('content');
       let html = '<div class="building"><h2>' + data.siteName + '</h2><p>Lütfen blok seçin</p></div>';
       html += '<div class="section-title">BLOKLAR</div>';
@@ -159,6 +205,8 @@
     }
 
     function renderGuardOnly(data, guardId) {
+      const bar = document.getElementById('searchbar');
+      if (bar) bar.style.display = 'none';
       const content = document.getElementById('content');
       let guard = (data.guards || []).find(g => String(g.userId) === String(guardId));
       if (!guard) guard = (data.guards || [])[0];
@@ -176,6 +224,7 @@
     }
 
     function renderResidents(data, flatParam, userParam, blockToken) {
+      showSearchbar();
       const content = document.getElementById('content');
       let residents = data.residents || [];
       if (flatParam) residents = residents.filter(r => String(r.flatNo) === String(flatParam));
@@ -196,6 +245,7 @@
         const r = residents[0];
         html += '<div class="item"><div class="info"><div class="name">' + r.name + '</div>'
           + '<div class="sub">Daire ' + (r.flatNo || '-') + '</div></div>'
+          + (r.apartmentId ? '<button class="btn-ring" onclick="ringFlat(\'' + r.apartmentId + '\',\'' + r.name.replace(/'/g,"") + '\')" title="Zil Cal">\uD83D\uDD14</button>' : '')
           + '<button onclick="callUser(\'' + r.userId + '\',\'' + r.name.replace(/'/g,"") + '\')">Ara</button></div>';
         content.innerHTML = html;
         return;
@@ -246,6 +296,7 @@
         html += '<div class="item">' + photoHtml + '<div class="info">'
           + '<div class="name">Daire ' + (f.flatNo || '-') + (nameLabel ? ': ' + nameLabel : '') + (f.listingStatus === 'sale' ? ' <span style="font-size:11px;font-weight:700;color:#c2691a;background:#fff0e0;padding:2px 8px;border-radius:10px;margin-left:6px;">Satilik</span>' : f.listingStatus === 'rent' ? ' <span style="font-size:11px;font-weight:700;color:#1a5fc2;background:#e3f0ff;padding:2px 8px;border-radius:10px;margin-left:6px;">Kiralik</span>' : '') + '</div>'
           + '<div class="sub">' + count + ' kişi' + (f.floor ? ' • Kat ' + f.floor : '') + '</div></div>'
+          + '<button class="btn-ring" onclick="ringFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')" title="Zil Cal">\uD83D\uDD14</button>'
           + '<button onclick="callFlat(\'' + f.apartmentId + '\',\'Daire ' + (f.flatNo || '-') + '\')">Ara</button></div>';
       });
 
@@ -319,6 +370,23 @@
         );
       });
     }
+    async function ringFlat(apartmentId, name) {
+      try {
+        const res = await fetch('/api/calls/ring', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apartmentId, visitorName: 'Ziyaretci' }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('🔔 ' + name + ' icin zil calindi');
+        } else {
+          alert(data.message || 'Zil calinamadi');
+        }
+      } catch (e) {
+        alert('Zil calinamadi, tekrar deneyin');
+      }
+    }
     async function callFlat(apartmentId, name) {
       currentPeerId = null;
       try {
@@ -350,6 +418,7 @@
       document.getElementById('callScreen').style.display = 'none';
     }
 
+    initSearch();
     load();
   </script>
 </body>
