@@ -3,10 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CallsService } from './calls.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PushService } from './push.service';
+import { CallsGateway } from './calls.gateway';
 
 @Controller('calls')
 export class CallsController {
-  constructor(private callsService: CallsService, private prisma: PrismaService, private push: PushService) {}
+  constructor(private callsService: CallsService, private prisma: PrismaService, private push: PushService, private gateway: CallsGateway) {}
 
   // Cagri gecmisim
   @UseGuards(JwtAuthGuard)
@@ -28,6 +29,13 @@ export class CallsController {
     }
     return { url };
   }
+  // CallKit decline / arka plan reddi (soket bagli olmayabilir) - misafire call:rejected yollar
+  @Post('reject')
+  async rejectCall(@Body() body: { callId: string }) {
+    if (!body?.callId) return { success: false, message: 'callId gerekli' };
+    return this.gateway.rejectByCallId(body.callId);
+  }
+
   // ZIL CAL - ziyaretci daireye zil calar, sakinlerin telefonu oter (gorusme baslatmadan)
   @Post('ring')
   async ring(@Body() body: { apartmentId: string; visitorName?: string; sound?: string }) {

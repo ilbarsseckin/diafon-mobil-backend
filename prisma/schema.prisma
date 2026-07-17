@@ -25,6 +25,7 @@ model User {
   callerCalls   Call[]     @relation("CallerUser")
   receiverCalls Call[]     @relation("ReceiverUser")
   residents     Resident[]
+  vehicleLinks  VehicleUser[]
   @@map("users")
 }
 
@@ -95,6 +96,9 @@ model Call {
   callerPhotoUrl String?    @map("caller_photo_url")
   guestName      String?    @map("guest_name")
   apartmentId    String?    @map("apartment_id")
+  callerLat      Float?     @map("caller_lat")
+  callerLng      Float?     @map("caller_lng")
+  vehicleId      String?    @map("vehicle_id")
   building       Building?  @relation(fields: [buildingId], references: [id])
   callerUser     User?      @relation("CallerUser", fields: [callerUserId], references: [id], onDelete: Restrict)
   receiverUser   User       @relation("ReceiverUser", fields: [receiverUserId], references: [id])
@@ -162,8 +166,10 @@ model Subscription {
   monthlyPrice    Int       @default(0) @map("monthly_price")
   trialEndsAt     DateTime? @map("trial_ends_at")
   currentPeriodEnd DateTime? @map("current_period_end")
+  vehicleId        String?   @map("vehicle_id")
   createdAt       DateTime  @default(now()) @map("created_at")
   @@index([ownerUserId], map: "idx_subs_owner")
+  @@index([vehicleId], map: "idx_subs_vehicle")
   @@map("subscriptions")
 }
 
@@ -194,6 +200,16 @@ model Plan {
   @@map("plans")
 }
 
+model SiteText {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  valueTr   String   @map("value_tr")
+  valueEn   String   @map("value_en")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("site_texts")
+}
+
+
 enum CallStatus {
   RINGING
   ACCEPTED
@@ -207,3 +223,57 @@ enum UserRole {
   RESIDENT
   ADMIN
 }
+
+model Vehicle {
+  id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  ownerUserId    String?  @map("owner_user_id")
+  label          String?
+  plate          String?
+  code           String   @unique
+  secretCodeHash String   @map("secret_code_hash")
+  status         String   @default("unsold")
+  activeMessage  String?  @map("active_message")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  secondaryUsers VehicleUser[]
+
+  @@index([ownerUserId], map: "idx_vehicles_owner")
+  @@map("vehicles")
+}
+
+model VehicleUser {
+  id        String   @id @default(uuid())
+  vehicleId String   @map("vehicle_id")
+  userId    String   @map("user_id")
+  role      String   @default("secondary")
+  createdAt DateTime @default(now()) @map("created_at")
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([vehicleId, userId])
+  @@map("vehicle_users")
+}
+
+model VehicleOrder {
+  id                String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  buyerName         String    @map("buyer_name")
+  buyerPhone        String    @map("buyer_phone")
+  buyerEmail        String?   @map("buyer_email")
+  shipCity          String    @map("ship_city")
+  shipDistrict      String?   @map("ship_district")
+  shipAddress       String    @map("ship_address")
+  amount            Int
+  status            String    @default("pending")
+  shipStatus        String    @default("preparing") @map("ship_status")
+  trackingNo        String?   @map("tracking_no")
+  conversationId    String?   @map("conversation_id")
+  iyzicoPaymentId   String?   @map("iyzico_payment_id")
+  vehicleCode       String?   @map("vehicle_code")
+  vehicleSecretCode String?   @map("vehicle_secret_code")
+  buyerUserId       String?   @map("buyer_user_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  paidAt            DateTime? @map("paid_at")
+  shippedAt         DateTime? @map("shipped_at")
+  @@index([status], map: "idx_vorders_status")
+  @@map("vehicle_orders")
+}
+

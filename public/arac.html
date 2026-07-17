@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mobil Diafon - Ara</title>
+  <title>MobilDiafon Auto - Araç Sahibini Ara</title>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -33,6 +33,17 @@
     .item .name { font-weight: 700; font-size: 15px; color: #14213D; overflow: hidden; text-overflow: ellipsis; }
     .item .sub { font-size: 12.5px; color: #7a8398; margin-top: 2px; }
     .item button { flex-shrink: 0; background: #E63946; color: white; border: none; padding: 11px 18px; border-radius: 14px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 3px 10px rgba(230,57,70,0.25); }
+    .arac-card { background: #fff; margin: 16px 12px; padding: 32px 20px; border-radius: 18px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); text-align: center; }
+    .arac-veh { font-size: 15px; font-weight: 700; color: #16213a; margin-bottom: 20px; }
+    .arac-card img, .arac-card > div[style*="border-radius:50%"] { margin: 0 auto; }
+    .arac-name { font-size: 22px; font-weight: 700; color: #16213a; margin-top: 16px; }
+    .arac-online { margin-top: 6px; }
+    .arac-call-btn { display: block; width: 100%; margin-top: 24px; padding: 18px; background: #E63946; color: #fff; border: none; border-radius: 16px; font-size: 19px; font-weight: 800; cursor: pointer; box-shadow: 0 6px 18px rgba(230,57,70,0.38); }
+    .arac-call-btn:active { transform: scale(0.98); }
+    .arac-ring-btn { display: block; width: 100%; margin-top: 12px; padding: 16px; background: #1B2A4A; color: #fff; border: none; border-radius: 16px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .arac-ring-btn:disabled { opacity: 0.85; }
+    .arac-msg { margin-top: 16px; padding: 14px 16px; background: #fff8e1; border: 1px solid #ffe082; border-radius: 14px; font-size: 15px; color: #8a6d00; font-weight: 600; }
+    .arac-kvkk { margin-top: 14px; font-size: 11px; color: #8a93a8; line-height: 1.4; }
     .item button:active { background: #c1121f; }
     .item button.btn-ring { background: #fff4e5; color: #E8830C; box-shadow: none; border: 1.5px solid #f5d9b0; padding: 11px 13px; margin-right: 8px; font-size: 16px; }
     .item button.btn-ring:active { background: #ffe9cc; }
@@ -61,11 +72,11 @@
   <div class="header">
     <img class="logo" src="https://cdn.mobildiafon.com/logo/logo.webp" alt="MobilDiafon" onerror="this.parentElement.querySelector('.brand').style.display='block'">
     <div class="brand" style="display:none">MobilDiafon</div>
-    <div class="slogan">Kapınızı dijitalleştirin</div>
+    <div class="slogan">Araç sahibine ulaşın</div>
     <div class="trust">🔒 Güvenli görüntülü görüşme</div>
   </div>
   <div class="steps">
-    <div class="step"><b>1</b> Daire / kişi seç</div>
+    <div class="step"><b>1</b> Araç sahibi</div>
     <div class="step"><b>2</b> Ara</div>
     <div class="step"><b>3</b> Görüntülü görüş</div>
   </div>
@@ -75,8 +86,8 @@
   <div class="no-result" id="noResult">Sonuç bulunamadı</div>
   <div id="content"><div class="loading">Yükleniyor...</div></div>
   <div class="site-footer">
-    <div class="ttl">Siz de binanıza MobilDiafon kurun</div>
-    <div class="txt">Diafon artık cebinizde. QR ile dijital diafon, görüntülü arama ve daha fazlası.</div>
+    <div class="ttl">Siz de aracınıza MobilDiafon Auto alın</div>
+    <div class="txt">Aracınıza yapıştırdığınız QR ile, numaranızı paylaşmadan size ulaşılsın.</div>
     <a class="cta" href="https://mobildiafon.com" target="_blank" rel="noopener">Keşfet →</a>
     <a class="link" href="https://mobildiafon.com" target="_blank" rel="noopener">mobildiafon.com</a>
   </div>
@@ -145,6 +156,25 @@
       const bar = document.getElementById('searchbar');
       if (bar) bar.style.display = '';
     }
+    async function ringVehicle() {
+      const btn = document.querySelector('.arac-ring-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Gönderiliyor...'; }
+      try {
+        const res = await fetch(API + '/vehicles/ring/' + encodeURIComponent(vehCode), { method: 'POST' });
+        const data = await res.json();
+        if (btn) {
+          if (data.success) {
+            btn.textContent = '✓ Sahibe haber verildi';
+            btn.style.background = '#1a8f3c';
+          } else {
+            btn.textContent = data.message || 'Gönderilemedi';
+            btn.disabled = false;
+          }
+        }
+      } catch (e) {
+        if (btn) { btn.textContent = 'Bağlantı hatası'; btn.disabled = false; }
+      }
+    }
     async function loadVehicle() {
       const content = document.getElementById('content');
       try {
@@ -153,19 +183,28 @@
         if (!data.found) { content.innerHTML = '<div class="error">' + (data.message || 'Araç bulunamadı') + '</div>'; return; }
         const o = data.owner || {};
         const onlineDot = o.isOnline ? '<span style="color:#1a8f3c;font-size:13px;">● Çevrimiçi</span>' : '<span style="color:#888;font-size:13px;">● Çevrimdışı</span>';
-        const photo = o.photoUrl ? '<img src="' + o.photoUrl + '" style="width:56px;height:56px;border-radius:50%;object-fit:cover;">' : '<div style="width:56px;height:56px;border-radius:50%;background:#E63946;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;">🚗</div>';
+        const aracAdi = data.vehicle.label || 'Araç';
+        const mesajHtml = data.activeMessage
+          ? '<div class="arac-msg">💬 ' + data.activeMessage + '</div>'
+          : '';
         content.innerHTML =
-          '<div class="building"><h2>🚗 ' + (data.vehicle.label || 'Araç') + '</h2><p>Araç sahibiyle görüşün</p></div>' +
-          '<div class="resident">' + photo +
-          '<div class="info" style="margin-left:12px;"><div class="name">' + (o.name || 'Araç Sahibi') + '</div><div class="flat">' + onlineDot + '</div></div>' +
-          '<button onclick="callUser(\'' + o.userId + '\',\'' + (o.name || 'Araç Sahibi') + '\')">Ara</button></div>';
+          '<div class="arac-card">' +
+            '<div style="width:96px;height:96px;border-radius:50%;background:#E63946;color:#fff;display:flex;align-items:center;justify-content:center;font-size:44px;margin:0 auto;">🚗</div>' +
+            '<div class="arac-name">' + aracAdi + '</div>' +
+            '<div class="arac-online">' + onlineDot + '</div>' +
+            mesajHtml +
+            '<button class="arac-call-btn" onclick="callUser(\'' + o.userId + '\',\'' + aracAdi + '\')">📞 Ara</button>' +
+            '<button class="arac-ring-btn" onclick="ringVehicle()">🔔 Zil Çal (Sahibe Haber Ver)</button>' +
+            '<div class="arac-kvkk">🔒 Güvenlik amacıyla aramanız konumunuzla birlikte kaydedilir.</div>' +
+          '</div>';
       } catch (e) {
         content.innerHTML = '<div class="error">Bağlantı hatası</div>';
       }
     }
     async function load() {
       const content = document.getElementById('content');
-      if (vehCode) { return loadVehicle(); }
+      if (!vehCode) { content.innerHTML = '<div class="error">Geçersiz araç bağlantısı</div>'; return; }
+      return loadVehicle();
       if (!token) { content.innerHTML = '<div class="error">Geçersiz bağlantı</div>'; return; }
       try {
         const res = await fetch(API + '/buildings/by-qr?token=' + encodeURIComponent(token));
@@ -372,9 +411,15 @@
       currentPeerId = userId;
       try {
         if (!await setupCall(name)) return;
-        const startUser = () => {
+        const startUser = async () => {
           document.getElementById('callStatus').textContent = name + ' aranıyor...';
-          socket.emit('call:start', { receiverUserId: userId });
+          let pos = null;
+          try { pos = await getPos(); } catch (e) {}
+          socket.emit('call:start', {
+            receiverUserId: userId,
+            callerLat: pos ? pos.lat : undefined,
+            callerLng: pos ? pos.lng : undefined,
+          });
         };
         if (socket.connected) startUser(); else socket.once('connect', startUser);
       } catch (e) { document.getElementById('callStatus').textContent = 'Hata: ' + e.message; setTimeout(endCall, 2000); }

@@ -43,6 +43,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
       client.data.isGuest = payload.guest === true;
       client.data.guestName = payload.name || 'Ziyaretçi';
+      client.data.vehicleId = payload.vehicleId || null;
       this.logger.log(`Baglandi: user=${userId} socket=${client.id}`);
     } catch (e) {
       this.logger.warn(`Gecersiz token, baglanti reddedildi: ${e.message}`);
@@ -82,7 +83,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:start')
   async onCallStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { receiverUserId: string; buildingId?: string; callerPhotoUrl?: string },
+    @MessageBody() data: { receiverUserId: string; buildingId?: string; callerPhotoUrl?: string; callerLat?: number; callerLng?: number },
   ) {
     const callerUserId = client.data.userId;
     const isGuest = client.data.isGuest === true;
@@ -99,9 +100,24 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     }
 
-    // Cagri kaydi (misafir ise DB'ye yazma, gecici callId)
+    // Cagri kaydi. Arac misafir cagrisi -> konumla DB'ye yaz (guvenlik). Bina misafir -> gecici.
+    const vehId = client.data.vehicleId || null;
     let callId: string;
-    if (isGuest) {
+    if (isGuest && vehId) {
+      // Arac misafir cagrisi: anonim Ziyaretci + konum + tarih
+      const call = await this.prisma.call.create({
+        data: {
+          callerUserId: null,
+          receiverUserId: data.receiverUserId,
+          status: 'RINGING',
+          guestName: 'Ziyaretçi',
+          vehicleId: vehId,
+          callerLat: typeof data.callerLat === 'number' ? data.callerLat : null,
+          callerLng: typeof data.callerLng === 'number' ? data.callerLng : null,
+        },
+      });
+      callId = call.id;
+    } else if (isGuest) {
       callId = 'guestcall_' + Math.random().toString(36).substring(2, 14);
     } else {
       const call = await this.prisma.call.create({
@@ -141,6 +157,27 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.emit('call:ringing', { callId });
     await this.push.sendIncomingCall(data.receiverUserId, caller?.name || 'Birisi', callId, callerUserId, data.callerPhotoUrl);
     this.logger.log(`Cagri: ${callerUserId} (guest=${isGuest}) -> ${data.receiverUserId} (call=${callId})`);
+
+    // ARAC/GUEST cagri timeout: 45sn icinde kabul edilmezse misafirin ekranini kapat.
+    // (Killed app'te CallKit red'i Dart'a ulasmadigi icin tek tarafli guvence.)
+    if (isGuest) {
+      const tCallId = callId;
+      const tSocketId = client.id;
+      setTimeout(async () => {
+        const still = this.guestCalls.get(tCallId);
+        if (!still) return; // kabul/red ile zaten temizlenmis
+        // DB'de kabul edilmis mi? (arac cagrisinda kayit var)
+        try {
+          const rec = await this.prisma.call.findUnique({ where: { id: tCallId } });
+          if (rec && rec.status === 'ACCEPTED') return; // gorusme suruyor, dokunma
+        } catch (e) { /* gecici callId olabilir, devam */ }
+        this.server.to(tSocketId).emit('call:unavailable', { callId: tCallId, reason: 'Cevap verilmedi' });
+        this.guestCalls.delete(tCallId);
+        try {
+          await this.prisma.call.update({ where: { id: tCallId }, data: { status: 'MISSED', endedAt: new Date() } });
+        } catch (e) { /* gecici callId olabilir */ }
+      }, 45000);
+    }
   }
 
   // --- Cagri kabul ---
@@ -299,6 +336,21 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('call:accept')
   async onCallAccept(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    // ARAC/GUEST accept fallback: dus UUID callId'li misafir cagrilari (arac) burada yakalanir.
+    // flatcall_/guestcall_ disindaki misafir cagrilari normal DB daluna dusup callerUserId=null
+    // oldugu icin arayana call:accepted gonderemiyordu. guestCalls'ta varsa dogrudan arayana yolla.
+    {
+      const gAuto = this.guestCalls.get(data.callId);
+      if (gAuto && !data.callId.startsWith('flatcall_') && !data.callId.startsWith('guestcall_')) {
+        const accepterId = client.data.userId;
+        gAuto.receiverUserId = accepterId;
+        this.server.to(gAuto.callerSocketId).emit('call:accepted', { callId: data.callId, accepterId });
+        try {
+          await this.prisma.call.update({ where: { id: data.callId }, data: { status: 'ACCEPTED' } });
+        } catch (e) { /* arac cagrisi olmayabilir, sorun degil */ }
+        return;
+      }
+    }
     // Daire (grup) cagrisi: ilk acan kazanir, digerlerini sustur
     if (data.callId.startsWith('flatcall_')) {
       const flat = this.flatCallTargets.get(data.callId);
@@ -359,8 +411,38 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- Cagri red ---
+  // REST'ten (CallKit decline, arka plan) cagrilan reddetme - misafire call:rejected yollar
+  async rejectByCallId(callId: string): Promise<{ success: boolean }> {
+    const g = this.guestCalls.get(callId);
+    if (g) {
+      this.server.to(g.callerSocketId).emit('call:rejected', { callId });
+      this.guestCalls.delete(callId);
+    }
+    // Daire cagrisi ise grup hedefini de temizle
+    const flat = this.flatCallTargets.get(callId);
+    if (flat) {
+      this.flatCallTargets.delete(callId);
+    }
+    try {
+      await this.prisma.call.update({ where: { id: callId }, data: { status: 'REJECTED', endedAt: new Date() } });
+    } catch (e) { /* gecici/guest callId olabilir */ }
+    return { success: true };
+  }
+
   @SubscribeMessage('call:reject')
   async onCallReject(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    // ARAC/GUEST reject fallback: dus UUID callId'li misafir (arac) cagrilarini yakala.
+    {
+      const gAuto = this.guestCalls.get(data.callId);
+      if (gAuto && !data.callId.startsWith('flatcall_') && !data.callId.startsWith('guestcall_')) {
+        this.server.to(gAuto.callerSocketId).emit('call:rejected', { callId: data.callId });
+        this.guestCalls.delete(data.callId);
+        try {
+          await this.prisma.call.update({ where: { id: data.callId }, data: { status: 'REJECTED', endedAt: new Date() } });
+        } catch (e) { /* arac cagrisi olmayabilir */ }
+        return;
+      }
+    }
     // Daire (grup) cagrisi: bir kisi reddederse cikar, HERKES reddederse arayana bildir
     if (data.callId.startsWith('flatcall_')) {
       const flat = this.flatCallTargets.get(data.callId);

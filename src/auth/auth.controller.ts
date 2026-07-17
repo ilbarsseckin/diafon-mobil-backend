@@ -76,7 +76,20 @@ export class AuthController {
 
   // Misafir (ziyaretci) token - uygulamasiz arama icin
   @Post('guest-token')
-  async guestToken(@Body() body: { qrToken: string }) {
+  async guestToken(@Body() body: { qrToken?: string; code?: string }) {
+    // Arac modu: camdaki QR code'u ile misafir token
+    if (body.code) {
+      const vehicle = await this.prisma.vehicle.findUnique({ where: { code: body.code } });
+      if (!vehicle || vehicle.status !== 'active' || !vehicle.ownerUserId) {
+        return { success: false, message: 'Arac bulunamadi veya aktif degil' };
+      }
+      const guestId = 'guest_' + Math.random().toString(36).substring(2, 12);
+      const token = this.jwtService.sign(
+        { sub: guestId, role: 'GUEST', guest: true, name: 'Ziyaretçi', vehicleId: vehicle.id },
+        { secret: process.env.JWT_SECRET || 'dev-secret', expiresIn: '30m' },
+      );
+      return { success: true, token, guestId, vehicleLabel: vehicle.label || 'Arac' };
+    }
     if (!body.qrToken) {
       return { success: false, message: 'QR token gerekli' };
     }

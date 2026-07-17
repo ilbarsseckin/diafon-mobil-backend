@@ -130,4 +130,41 @@ export class SuperadminService {
     }
     return { customers };
   }
+
+  // Tum isletmeler (type='business') - Isletmeler sekmesi
+  async businesses() {
+    const bldgs = await this.prisma.building.findMany({
+      where: { type: 'business' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (bldgs.length === 0) return { businesses: [] };
+
+    const ownerIds = [...new Set(bldgs.map(b => b.ownerUserId).filter(Boolean))] as string[];
+    const owners = await this.prisma.user.findMany({ where: { id: { in: ownerIds } } });
+    const ownerMap = new Map(owners.map(o => [o.id, o]));
+
+    const businesses = await Promise.all(
+      bldgs.map(async (b) => {
+        const owner = b.ownerUserId ? ownerMap.get(b.ownerUserId) : null;
+        const callCount = await this.prisma.call.count({ where: { buildingId: b.id } });
+        const unitCount = await this.prisma.apartment.count({ where: { buildingId: b.id } });
+        return {
+          id: b.id,
+          name: b.buildingName,
+          category: b.businessCategory || '-',
+          owner: owner?.name || 'Bilinmeyen',
+          phone: owner?.phone || '',
+          address: b.address || '',
+          latitude: b.latitude,
+          longitude: b.longitude,
+          units: unitCount,
+          calls: callCount,
+          qrToken: b.qrToken,
+          since: b.createdAt,
+        };
+      })
+    );
+    return { businesses };
+  }
+
 }

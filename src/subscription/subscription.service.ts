@@ -37,7 +37,7 @@ export class SubscriptionService {
   async mySubscriptions(userId: string) {
     // Yoneticinin sahip oldugu binalar -> site/bireysel gruplari
     const buildings = await this.prisma.building.findMany({ where: { ownerUserId: userId } });
-    if (buildings.length === 0) return { isManager: false, subscriptions: [] };
+    const isManager = buildings.length > 0;
 
     // Site bazli grupla (siteName varsa site, yoksa bireysel bina)
     const groups = new Map<string, { scopeType: string; scopeName: string; label: string; flatCount: number }>();
@@ -118,6 +118,32 @@ export class SubscriptionService {
         isTrial: sub.status === 'trial',
       });
     }
-    return { isManager: true, subscriptions: result };
+    // Arac (auto) aboneliklerini ekle
+    const autoSubs = await this.prisma.subscription.findMany({
+      where: { ownerUserId: userId, scopeType: 'auto' },
+      orderBy: { createdAt: 'desc' },
+    });
+    for (const s of autoSubs) {
+      const end = s.currentPeriodEnd;
+      const left = this.daysLeft(end);
+      let status = s.status;
+      if (left <= 0 && status === 'active') {
+        status = 'expired';
+        await this.prisma.subscription.update({ where: { id: s.id }, data: { status: 'expired' } });
+      }
+      result.push({
+        id: s.id,
+        label: s.scopeName,
+        scopeType: 'auto',
+        scopeName: s.scopeName,
+        status,
+        flatCount: 0,
+        monthlyPrice: s.monthlyPrice,
+        daysLeft: left,
+        periodEnd: end,
+        isTrial: false,
+      });
+    }
+    return { isManager, subscriptions: result };
   }
 }

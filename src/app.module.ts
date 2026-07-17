@@ -14,6 +14,9 @@ import { PlansModule } from './plans/plans.module';
 import { MailModule } from './mail/mail.module';
 import { SmsModule } from './sms/sms.module';
 import { PaymentModule } from './payment/payment.module';
+import { SiteTextsModule } from './site-texts/site-texts.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
+import { VehicleOrdersModule } from './vehicle-orders/vehicle-orders.module';
 import { AccountCleanupService } from './tasks/account-cleanup.service';
 
 @Module({
@@ -31,6 +34,9 @@ import { AccountCleanupService } from './tasks/account-cleanup.service';
     PaymentModule,
     SmsModule,
     MailModule,
+    SiteTextsModule,
+    VehiclesModule,
+    VehicleOrdersModule,
     PlansModule,
   ],
   controllers: [HealthController],
