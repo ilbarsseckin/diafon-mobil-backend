@@ -10,8 +10,8 @@ export class MailService {
     this.transporter = nodemailer.createTransport({
       host: process.env.MAIL_HOST || 'smtp.gmail.com',
       port: parseInt(process.env.MAIL_PORT || '587'),
-      secure: false,
-      requireTLS: true,
+      secure: parseInt(process.env.MAIL_PORT || '587') === 465,
+      requireTLS: parseInt(process.env.MAIL_PORT || '587') !== 465,
       auth: {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS,
@@ -19,13 +19,14 @@ export class MailService {
     });
   }
 
-  async send(to: string, subject: string, html: string): Promise<boolean> {
+  async send(to: string, subject: string, html: string, attachments?: any[]): Promise<boolean> {
     try {
       await this.transporter.sendMail({
         from: process.env.MAIL_FROM || 'Diafon <info@smartdiafon.com>',
         to,
         subject,
         html,
+        attachments: attachments || [],
       });
       this.logger.log(`Mail gonderildi: ${to}`);
       return true;
@@ -123,4 +124,33 @@ export class MailService {
     `;
     await this.send(to, 'Aboneliğiniz Sona Erdi', html);
   }
+
+  // Fatura maili (PDF ekli)
+  async sendInvoice(to: string, name: string, pdfPath: string, title?: string): Promise<boolean> {
+    const fs = require('fs');
+    const path = require('path');
+    const abs = path.join(__dirname, '..', '..', pdfPath.replace(/^\/uploads\//, 'uploads/'));
+    let attachments: any[] = [];
+    try {
+      if (fs.existsSync(abs)) {
+        attachments = [{ filename: (title || 'fatura') + '.pdf', content: fs.readFileSync(abs) }];
+      }
+    } catch {}
+    const html = `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+        <div style="background:#E63946;padding:24px;text-align:center;">
+          <h1 style="color:white;margin:0;">Faturaniz</h1>
+        </div>
+        <div style="padding:24px;background:#f9f9f9;">
+          <p>Merhaba <strong>${name}</strong>,</p>
+          <p>${title ? title + ' ' : ''}faturaniz ektedir.</p>
+          <p>Bizi tercih ettiginiz icin tesekkur ederiz.</p>
+          <br>
+          <p><strong>Diafon Ekibi</strong></p>
+        </div>
+      </div>
+    `;
+    return this.send(to, title || 'Faturaniz', html, attachments);
+  }
+
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 
 function pricePerFlat(count: number): number {
   if (count <= 20) return 15;
@@ -10,7 +11,7 @@ function pricePerFlat(count: number): number {
 
 @Injectable()
 export class SuperadminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private mail: MailService) {}
 
   // Genel bakis: KPI + grafik verileri
   async overview() {
@@ -165,6 +166,89 @@ export class SuperadminService {
       })
     );
     return { businesses };
+  }
+
+
+  // ---- FATURALAR ----
+  async invoices() {
+    const list = await this.prisma.invoice.findMany({ orderBy: { createdAt: 'desc' } });
+    if (list.length === 0) return { invoices: [] };
+    const ownerIds = [...new Set(list.map(i => i.ownerUserId).filter(Boolean))] as string[];
+    const owners = await this.prisma.user.findMany({ where: { id: { in: ownerIds } } });
+    const om = new Map(owners.map(o => [o.id, o]));
+    const invoices = list.map(i => {
+      const o = om.get(i.ownerUserId);
+      return {
+        id: i.id,
+        ownerUserId: i.ownerUserId,
+        owner: o?.name || 'Bilinmeyen',
+        phone: o?.phone || '',
+        email: o?.email || '',
+        title: i.title || '',
+        amount: i.amount || 0,
+        paymentStatus: i.paymentStatus,
+        fileUrl: i.fileUrl || '',
+        uploaded: !!i.uploadedAt,
+        sent: !!i.sentAt,
+        sentAt: i.sentAt,
+        createdAt: i.createdAt,
+      };
+    });
+    return { invoices };
+  }
+
+  async createInvoice(dto: { ownerUserId: string; title?: string; amount?: number; buildingId?: string; vehicleId?: string; note?: string }) {
+    if (!dto.ownerUserId) return { success: false, message: 'Owner gerekli' };
+    const owner = await this.prisma.user.findUnique({ where: { id: dto.ownerUserId } });
+    if (!owner) return { success: false, message: 'Owner bulunamadi' };
+    const inv = await this.prisma.invoice.create({
+      data: {
+        ownerUserId: dto.ownerUserId,
+        title: dto.title || null,
+        amount: dto.amount ?? null,
+        buildingId: dto.buildingId || null,
+        vehicleId: dto.vehicleId || null,
+        note: dto.note || null,
+      },
+    });
+    return { success: true, id: inv.id };
+  }
+
+  async markInvoicePaid(id: string, paid: boolean) {
+    const inv = await this.prisma.invoice.findUnique({ where: { id } });
+    if (!inv) return { success: false, message: 'Fatura bulunamadi' };
+    await this.prisma.invoice.update({ where: { id }, data: { paymentStatus: paid ? 'paid' : 'pending' } });
+    return { success: true };
+  }
+
+  async sendInvoiceMail(id: string) {
+    const inv = await this.prisma.invoice.findUnique({ where: { id } });
+    if (!inv) return { success: false, message: 'Fatura bulunamadi' };
+    if (!inv.fileUrl) return { success: false, message: 'Once PDF yukleyin' };
+    const owner = await this.prisma.user.findUnique({ where: { id: inv.ownerUserId } });
+    if (!owner) return { success: false, message: 'Owner bulunamadi' };
+    if (!owner.email) return { success: false, message: 'Owner\'in mail adresi yok' };
+    const ok = await this.mail.sendInvoice(owner.email, owner.name, inv.fileUrl, inv.title || undefined);
+    if (!ok) return { success: false, message: 'Mail gonderilemedi' };
+    await this.prisma.invoice.update({ where: { id }, data: { sentAt: new Date() } });
+    return { success: true };
+  }
+
+
+  async uploadInvoiceFile(id: string, base64: string) {
+    const inv = await this.prisma.invoice.findUnique({ where: { id } });
+    if (!inv) return { success: false, message: 'Fatura bulunamadi' };
+    const fs = require('fs');
+    const path = require('path');
+    const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const clean = base64.replace(/^data:application\/pdf;base64,/, '').replace(/^data:[^;]+;base64,/, '');
+    const buffer = Buffer.from(clean, 'base64');
+    const filename = `invoice_${id}_${Date.now()}.pdf`;
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    const url = `/uploads/${filename}`;
+    await this.prisma.invoice.update({ where: { id }, data: { fileUrl: url, uploadedAt: new Date() } });
+    return { success: true, url };
   }
 
 }

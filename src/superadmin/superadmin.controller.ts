@@ -148,4 +148,41 @@ export class SuperadminController {
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
     return this.vehiclesService.vehiclesOverview();
   }
+
+  private auth(auth: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+  }
+
+  @Get('invoices')
+  async invoices(@Headers('authorization') a: string) {
+    this.auth(a);
+    return this.service.invoices();
+  }
+
+  @Post('invoices/create')
+  async createInvoice(@Headers('authorization') a: string, @Body() body: { ownerUserId: string; title?: string; amount?: number; buildingId?: string; vehicleId?: string; note?: string }) {
+    this.auth(a);
+    return this.service.createInvoice(body);
+  }
+
+  @Post('invoices/upload')
+  async uploadInvoice(@Headers('authorization') a: string, @Body() body: { id: string; file: string }) {
+    this.auth(a);
+    return this.service.uploadInvoiceFile(body.id, body.file);
+  }
+
+  @Post('invoices/mark-paid')
+  async markInvoicePaid(@Headers('authorization') a: string, @Body() body: { id: string; paid: boolean }) {
+    this.auth(a);
+    return this.service.markInvoicePaid(body.id, body.paid);
+  }
+
+  @Post('invoices/send')
+  async sendInvoice(@Headers('authorization') a: string, @Body() body: { id: string }) {
+    this.auth(a);
+    return this.service.sendInvoiceMail(body.id);
+  }
+
 }

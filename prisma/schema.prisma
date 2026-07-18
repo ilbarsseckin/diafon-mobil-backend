@@ -209,6 +209,22 @@ model SiteText {
   @@map("site_texts")
 }
 
+model Invoice {
+  id             String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  ownerUserId    String    @map("owner_user_id")
+  title          String?
+  amount         Int?
+  paymentStatus String    @default("pending") @map("payment_status")
+  fileUrl        String?   @map("file_url")        // yuklenen PDF yolu
+  uploadedAt     DateTime? @map("uploaded_at")     // PDF yuklendi mi
+  sentAt         DateTime? @map("sent_at")         // mail gitti mi (null = gonderilmedi)
+  buildingId     String?   @map("building_id")     // opsiyonel: hangi bina/isletme
+  vehicleId      String?   @map("vehicle_id")      // opsiyonel: hangi arac QR
+  note           String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  @@index([ownerUserId], map: "idx_invoices_owner")
+  @@map("invoices")
+}
 
 enum CallStatus {
   RINGING
