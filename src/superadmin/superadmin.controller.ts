@@ -66,6 +66,23 @@ export class SuperadminController {
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
     return this.service.owners();
   }
+  @Post('vehicles/set-status')
+  async setVehicleStatus(@Headers('authorization') auth: string, @Body() body: { code: string; status: string }) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.service.setVehicleStatus(body.code, body.status);
+  }
+  @Get('vehicles/:code/qr')
+  async vehicleQr(@Headers('authorization') auth: string, @Param('code') code: string, @Res() res: Response) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) { res.status(401).json({ message: 'Yetkisiz' }); return; }
+    const png = await this.labelService.singleQr(code);
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="${code}.png"`);
+    res.send(png);
+  }
   @Get('locations')
   async locations(@Headers('authorization') auth: string) {
     const token = (auth || '').replace('Bearer ', '');

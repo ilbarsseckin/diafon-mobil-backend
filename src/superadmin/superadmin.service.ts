@@ -503,4 +503,25 @@ export class SuperadminService {
     return result;
   }
 
+
+  /** Karti elle yak / stoga geri al */
+  async setVehicleStatus(code: string, status: string) {
+    if (!['burned', 'unsold'].includes(status)) {
+      return { success: false, message: 'Gecersiz durum' };
+    }
+    const v = await this.prisma.vehicle.findUnique({ where: { code } });
+    if (!v) return { success: false, message: 'Kart bulunamadi' };
+    if (v.ownerUserId && status === 'unsold') {
+      return { success: false, message: 'Sahibi olan kart stoga alinamaz' };
+    }
+    await this.prisma.vehicle.update({ where: { id: v.id }, data: { status } });
+    if (status === 'burned') {
+      await this.prisma.subscription.updateMany({
+        where: { vehicleId: v.id },
+        data: { status: 'cancelled', cancelledAt: new Date() },
+      });
+    }
+    return { success: true, code, status };
+  }
+
 }

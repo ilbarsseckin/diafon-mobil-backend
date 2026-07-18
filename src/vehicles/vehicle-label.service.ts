@@ -12,6 +12,11 @@ const NAVY = '#1B2A4A';
 @Injectable()
 export class VehicleLabelService {
   // Bir kartin QR data URL'sini uret (sadece code linki, gizli kod QR'da YOK)
+  // Tek kartin QR PNG'i (public - superadmin panelinden indirilir)
+  async singleQr(code: string): Promise<Buffer> {
+    return this.qrBuffer(code);
+  }
+
   private async qrBuffer(code: string): Promise<Buffer> {
     return QRCode.toBuffer(BASE_URL + code, {
       type: 'png',
