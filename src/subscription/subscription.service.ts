@@ -35,70 +35,58 @@ export class SubscriptionService {
 
   // Yoneticinin tum abonelikleri + durum ozeti
   async mySubscriptions(userId: string) {
-    // Yoneticinin sahip oldugu binalar -> site/bireysel gruplari
-    const buildings = await this.prisma.building.findMany({ where: { ownerUserId: userId } });
-    const isManager = buildings.length > 0;
-
-    // Site bazli grupla (siteName varsa site, yoksa bireysel bina)
-    const groups = new Map<string, { scopeType: string; scopeName: string; label: string; flatCount: number }>();
-    for (const b of buildings) {
-      const aptCount = await this.prisma.apartment.count({ where: { buildingId: b.id } });
-      if (b.siteName) {
-        const key = 'site:' + b.siteName;
-        const g = groups.get(key) || { scopeType: 'site', scopeName: b.siteName, label: b.siteName, flatCount: 0 };
-        g.flatCount += aptCount;
-        groups.set(key, g);
-      } else {
-        const key = 'ind:' + b.id;
-        groups.set(key, { scopeType: 'individual', scopeName: b.id, label: b.buildingName, flatCount: aptCount });
-      }
-    }
-
+    // Kullanicinin sahip oldugu LOKASYONLAR (her lokasyon = 1 abonelik)
+    const locations = await this.prisma.location.findMany({
+      where: { ownerUserId: userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const isManager = locations.length > 0;
     const result: any[] = [];
-    for (const g of groups.values()) {
-      // Plan tablosundan aylik fiyat (birim sayisina gore)
-      const planPrice = await this.planPriceForUnits(g.flatCount || 1);
-      // Mevcut abonelik kaydi var mi?
+
+    for (const loc of locations) {
+      // Lokasyonun tum binalarindaki daire sayisi
+      const locBuildings = await this.prisma.building.findMany({
+        where: { locationId: loc.id },
+        select: { id: true },
+      });
+      let flatCount = 0;
+      for (const b of locBuildings) {
+        flatCount += await this.prisma.apartment.count({ where: { buildingId: b.id } });
+      }
+      const planPrice = await this.planPriceForUnits(flatCount || 1);
+
+      // Bu lokasyonun aboneligi
       let sub = await this.prisma.subscription.findFirst({
-        where: { ownerUserId: userId, scopeType: g.scopeType, scopeName: g.scopeName },
+        where: { locationId: loc.id },
         orderBy: { createdAt: 'desc' },
       });
-      // Yoksa abonelik baslat. Ama bu kullanici daha once deneme kullanmissa (expired/active gecmisi),
-      // tekrar bedava deneme HAKKI YOK -> direkt odeme bekleyen durumda baslat.
+
+      // Yoksa 14 gunluk deneme baslat (her lokasyon kendi denemesini alir)
       if (!sub) {
-        const usedTrialBefore = await this.prisma.subscription.findFirst({
-          where: {
-            ownerUserId: userId,
-            status: { in: ['expired', 'active', 'cancelled'] },
-          },
-        });
         const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
         sub = await this.prisma.subscription.create({
           data: {
             ownerUserId: userId,
-            scopeType: g.scopeType,
-            scopeName: g.scopeName,
-            status: usedTrialBefore ? 'pending_payment' : 'trial',
-            flatCount: g.flatCount,
+            locationId: loc.id,
+            scopeType: loc.type === 'business' ? 'business' : 'site',
+            scopeName: loc.name,
+            status: 'trial',
+            flatCount,
             monthlyPrice: planPrice,
-            trialEndsAt: usedTrialBefore ? new Date() : trialEnd,
-            currentPeriodEnd: usedTrialBefore ? new Date() : trialEnd,
+            trialEndsAt: trialEnd,
+            currentPeriodEnd: trialEnd,
           },
         });
-      } else if (sub.flatCount !== g.flatCount) {
+      } else if (sub.flatCount !== flatCount) {
         // Daire sayisi degistiyse fiyati guncelle
         sub = await this.prisma.subscription.update({
           where: { id: sub.id },
-          data: {
-            flatCount: g.flatCount,
-            monthlyPrice: planPrice,
-          },
+          data: { flatCount, monthlyPrice: planPrice },
         });
       }
 
       const end = sub.status === 'trial' ? sub.trialEndsAt : sub.currentPeriodEnd;
       const left = this.daysLeft(end);
-      // Suresi dolmus mu kontrol
       let status = sub.status;
       if (left <= 0 && (status === 'trial' || status === 'active')) {
         status = 'expired';
@@ -107,17 +95,19 @@ export class SubscriptionService {
 
       result.push({
         id: sub.id,
-        label: g.label,
-        scopeType: g.scopeType,
-        scopeName: g.scopeName,
+        label: loc.name,
+        locationId: loc.id,
+        scopeType: sub.scopeType,
+        scopeName: loc.name,
         status,
-        flatCount: g.flatCount,
+        flatCount,
         monthlyPrice: sub.monthlyPrice,
         daysLeft: left,
         periodEnd: end,
         isTrial: sub.status === 'trial',
       });
     }
+
     // Arac (auto) aboneliklerini ekle
     const autoSubs = await this.prisma.subscription.findMany({
       where: { ownerUserId: userId, scopeType: 'auto' },

@@ -141,7 +141,8 @@ export class VehicleOrdersService {
   }
 
   async list() {
-    return this.prisma.vehicleOrder.findMany({ orderBy: { createdAt: 'desc' } });
+    const orders = await this.prisma.vehicleOrder.findMany({ orderBy: { createdAt: 'desc' } });
+    return orders.map((o: any) => ({ ...o, refund: this.refundInfo(o) }));
   }
 
   async markShipped(id: string, trackingNo?: string) {
@@ -174,4 +175,91 @@ export class VehicleOrdersService {
 
     return order;
   }
+
+  private readonly TAG_AMOUNT = 190;
+  private readonly REFUND_DAYS = 14;
+
+  refundInfo(order: any) {
+    if (order.status === 'pending') {
+      return { canCancel: true, canRefund: false, amount: 0, reason: 'Odeme yapilmadi, iptal edilebilir' };
+    }
+    if (order.status !== 'paid') {
+      return { canCancel: false, canRefund: false, amount: 0, reason: 'Bu siparis icin islem yapilamaz' };
+    }
+    const baseDate = order.shippedAt || order.paidAt;
+    if (!baseDate) {
+      return { canCancel: false, canRefund: true, amount: order.amount, reason: 'Kargolanmadi, tam iade' };
+    }
+    const days = Math.floor((Date.now() - new Date(baseDate).getTime()) / 86400000);
+    if (days > this.REFUND_DAYS) {
+      return { canCancel: false, canRefund: false, amount: 0, reason: 'Iade suresi doldu (' + days + ' gun oldu)' };
+    }
+    const shipped = order.shipStatus === 'shipped';
+    return {
+      canCancel: false,
+      canRefund: true,
+      amount: shipped ? order.amount - this.TAG_AMOUNT : order.amount,
+      reason: shipped ? ('Kargolandi, ' + this.TAG_AMOUNT + ' TL etiket bedeli kesilir') : 'Kargolanmadi, tam iade',
+    };
+  }
+
+  async cancelOrder(id: string, reason?: string) {
+    const order = await this.prisma.vehicleOrder.findUnique({ where: { id } });
+    if (!order) throw new BadRequestException('Siparis bulunamadi');
+    if (order.status !== 'pending') throw new BadRequestException('Sadece odenmemis siparis iptal edilebilir');
+    return this.prisma.vehicleOrder.update({
+      where: { id },
+      data: { status: 'cancelled', cancelledAt: new Date(), refundReason: reason ? reason.trim() : null },
+    });
+  }
+
+  async refundOrder(id: string, reason?: string) {
+    const order: any = await this.prisma.vehicleOrder.findUnique({ where: { id } });
+    if (!order) throw new BadRequestException('Siparis bulunamadi');
+    if (order.refundedAt) throw new BadRequestException('Zaten iade edildi');
+    const info = this.refundInfo(order);
+    if (!info.canRefund) throw new BadRequestException(info.reason);
+
+    if (order.vehicleCode) {
+      const vehicle = await this.prisma.vehicle.findUnique({ where: { code: order.vehicleCode } });
+      if (vehicle) {
+        await this.prisma.vehicle.update({ where: { id: vehicle.id }, data: { status: 'burned' } });
+        await this.prisma.subscription.updateMany({
+          where: { vehicleId: vehicle.id },
+          data: { status: 'cancelled', cancelledAt: new Date() },
+        });
+      }
+    }
+
+    const updated = await this.prisma.vehicleOrder.update({
+      where: { id },
+      data: {
+        status: 'refunded',
+        refundedAt: new Date(),
+        refundAmount: info.amount,
+        refundReason: reason ? reason.trim() : null,
+        vehicleSecretCode: null,
+      },
+    });
+
+    if (order.buyerEmail && order.buyerEmail.includes('@')) {
+      const kesinti = order.shipStatus === 'shipped'
+        ? '<p>Kart size ulastigi icin ' + this.TAG_AMOUNT + ' TL etiket bedeli dusulmustur.</p><p><b>Onemli:</b> Kartinizi lutfen imha edin. Kart uzerindeki kod iptal edilmistir, tekrar kullanilamaz. Bize geri gondermenize gerek yoktur.</p>'
+        : '';
+      const html = '<h2>Iade talebiniz islendi</h2>'
+        + '<p>Merhaba ' + order.buyerName + ',</p>'
+        + '<p>MobilDiafon Auto siparisiniz iade edildi. Iade tutari: <b>' + info.amount + ' TL</b>.</p>'
+        + kesinti
+        + '<p>Iade tutari 3-7 is gunu icinde odeme yaptiginiz karta yansiyacaktir.</p>'
+        + '<p>MobilDiafon</p>';
+      this.mail.send(order.buyerEmail, 'Iadeniz Islendi - MobilDiafon Auto', html).catch((e) => this.logger.error('iade mail hata: ' + e));
+    }
+    if (order.buyerPhone && order.buyerPhone.trim()) {
+      this.sms.send(order.buyerPhone, 'MobilDiafon: Iadeniz islendi. Tutar ' + info.amount + ' TL, 3-7 is gunu icinde kartiniza yansir. Kartinizi imha ediniz.').catch((e) => this.logger.error('iade sms hata: ' + e));
+    }
+
+    this.logger.log('IADE: siparis=' + id + ' tutar=' + info.amount);
+    return { ...updated, refundedAmount: info.amount };
+  }
+
 }

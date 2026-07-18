@@ -74,6 +74,20 @@ export class SuperadminController {
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
     return this.orders.markShipped(body.id, body.trackingNo);
   }
+  @Post('vehicle-orders/cancel')
+  async cancelVehicleOrder(@Headers('authorization') auth: string, @Body() body: { id: string; reason?: string }) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.orders.cancelOrder(body.id, body.reason);
+  }
+  @Post('vehicle-orders/refund')
+  async refundVehicleOrder(@Headers('authorization') auth: string, @Body() body: { id: string; reason?: string }) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.orders.refundOrder(body.id, body.reason);
+  }
 
   // Toplu duyuru/reklam push gonder (tum kullanicilara)
   @Post('broadcast')

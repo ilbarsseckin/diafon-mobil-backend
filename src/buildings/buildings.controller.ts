@@ -65,7 +65,7 @@ export class BuildingsController {
   join(@Req() req: any, @Body() body: {
     buildingName: string; address?: string;
     latitude: number; longitude: number;
-    flatNo: string; floor?: string;
+    flatNo: string; floor?: string; buildingId?: string;
   }) {
     if (!body.buildingName || body.latitude == null || body.longitude == null || !body.flatNo) {
       throw new BadRequestException('Bina adi, konum ve daire no zorunlu');

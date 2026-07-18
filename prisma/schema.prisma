@@ -29,6 +29,22 @@ model User {
   @@map("users")
 }
 
+model Location {
+  id               String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name             String
+  type             String    @default("residential")
+  businessCategory String?   @map("business_category")
+  ownerUserId      String?   @map("owner_user_id")
+  address          String?
+  latitude         Float
+  longitude        Float
+  createdAt        DateTime  @default(now()) @map("created_at")
+  buildings        Building[]
+  subscriptions    Subscription[]
+  @@index([ownerUserId], map: "idx_locations_owner")
+  @@index([type], map: "idx_locations_type")
+  @@map("locations")
+}
 model Building {
   id                   String      @id @default(uuid())
   buildingName         String      @map("building_name")
@@ -51,6 +67,8 @@ model Building {
   type                 String      @default("residential")
   businessCategory     String?     @map("business_category")
   securityMode         String      @default("qr") @map("security_mode")
+  locationId           String?     @map("location_id")
+  location             Location?   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   apartments           Apartment[]
   calls                Call[]
   @@map("buildings")
@@ -168,6 +186,9 @@ model Subscription {
   currentPeriodEnd DateTime? @map("current_period_end")
   vehicleId        String?   @map("vehicle_id")
   createdAt       DateTime  @default(now()) @map("created_at")
+  cancelledAt     DateTime? @map("cancelled_at")
+  locationId      String?   @map("location_id")
+  location        Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
   @@index([ownerUserId], map: "idx_subs_owner")
   @@index([vehicleId], map: "idx_subs_vehicle")
   @@map("subscriptions")
@@ -289,6 +310,12 @@ model VehicleOrder {
   createdAt         DateTime  @default(now()) @map("created_at")
   paidAt            DateTime? @map("paid_at")
   shippedAt         DateTime? @map("shipped_at")
+  tagAmount          Int?      @map("tag_amount")
+  subscriptionAmount Int?      @map("subscription_amount")
+  refundedAt         DateTime? @map("refunded_at")
+  refundAmount       Int?      @map("refund_amount")
+  refundReason       String?   @map("refund_reason")
+  cancelledAt        DateTime? @map("cancelled_at")
   @@index([status], map: "idx_vorders_status")
   @@map("vehicle_orders")
 }

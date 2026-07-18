@@ -5,6 +5,9 @@ import { CreateBuildingDto } from './dto/building.dto';
 
 @Injectable()
 export class BuildingsService {
+  private normalize(s: string) {
+    return (s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+  }
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateBuildingDto) {
@@ -147,37 +150,95 @@ export class BuildingsService {
   async joinOrCreate(userId: string, dto: {
     buildingName: string; address?: string;
     latitude: number; longitude: number;
-    flatNo: string; floor?: string;
+    flatNo: string; floor?: string; buildingId?: string;
   }) {
-    // 1. Yakinda (30m) bina var mi?
+    // 1. Yakinda (30m) LOKASYON var mi?
     const near = await this.prisma.$queryRaw<any[]>`
-      SELECT id, building_name
-      FROM buildings
+      SELECT id, name
+      FROM locations
       WHERE ST_DWithin(
         ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
         ST_SetSRID(ST_MakePoint(${dto.longitude}, ${dto.latitude}), 4326)::geography,
         30
       )
+      AND type <> 'business'
       ORDER BY ST_Distance(
         ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
         ST_SetSRID(ST_MakePoint(${dto.longitude}, ${dto.latitude}), 4326)::geography
       ) ASC
       LIMIT 1
     `;
-
     let buildingId: string;
     let joined = false;
 
     if (near && near.length > 0) {
-      // Bina zaten var -> katil
-      buildingId = near[0].id;
-      joined = true;
+      const locationId = near[0].id;
+      const locBuildings = await this.prisma.building.findMany({
+        where: { locationId },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      // Kullanici blok sectiyse dogrudan ona katil
+      if (dto.buildingId) {
+        const secilen = locBuildings.find((b) => b.id === dto.buildingId);
+        if (!secilen) {
+          return { success: false, message: 'Secilen blok bu yapiya ait degil' } as any;
+        }
+        buildingId = secilen.id;
+        joined = true;
+      } else if (locBuildings.length > 1) {
+        // Cok bloklu yapi -> kullaniciya sor, kayit olusturma
+        const bloklar: any[] = [];
+        for (const b of locBuildings) {
+          const flatCount = await this.prisma.apartment.count({ where: { buildingId: b.id } });
+          bloklar.push({
+            id: b.id,
+            name: b.blockName || b.buildingName,
+            fullName: b.buildingName,
+            flatCount,
+          });
+        }
+        return {
+          needsBlockSelection: true,
+          locationName: near[0].name,
+          blocks: bloklar,
+          message: 'Bu yapida birden fazla blok var, lutfen blok seciniz',
+        } as any;
+      } else if (locBuildings.length === 1) {
+        buildingId = locBuildings[0].id;
+        joined = true;
+      } else {
+        // Lokasyon var ama binasi yok (olmamasi gereken durum) -> bina ac
+        const token = 'DIAFON-' + randomUUID().replace(/-/g, '');
+        const b = await this.prisma.building.create({
+          data: {
+            buildingName: near[0].name,
+            address: dto.address,
+            latitude: dto.latitude,
+            longitude: dto.longitude,
+            radiusMeter: 100,
+            qrToken: token,
+            ownerUserId: userId,
+            requireApproval: true,
+            locationId,
+          },
+        });
+        buildingId = b.id;
+        joined = true;
+      }
     } else {
-      // Yeni bina olustur (otomatik QR token ile)
+      // Yeni LOKASYON + altina bina olustur
+      const location = await this.prisma.location.create({
+        data: {
+          name: dto.buildingName,
+          type: 'residential',
+          ownerUserId: userId,
+          address: dto.address || null,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+        },
+      });
       const newToken = 'DIAFON-' + randomUUID().replace(/-/g, '');
-      // Kurucu premium mi? Premium ise yonetici olur + onay sistemi acilir
-      const creator = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
-      const isPremiumCreator = creator?.isPremium === true;
       const b = await this.prisma.building.create({
         data: {
           buildingName: dto.buildingName,
@@ -186,8 +247,9 @@ export class BuildingsService {
           longitude: dto.longitude,
           radiusMeter: 100,
           qrToken: newToken,
-          ownerUserId: isPremiumCreator ? userId : null,
-          requireApproval: isPremiumCreator,
+          ownerUserId: userId,
+          requireApproval: true,
+          locationId: location.id,
         },
       });
       buildingId = b.id;
@@ -476,7 +538,7 @@ export class BuildingsService {
 
   async nearbyBuildings(lat: number, lng: number, radiusMeters = 150) {
     const buildings = await this.prisma.$queryRaw<any[]>`
-      SELECT id, building_name, address, type,
+      SELECT id, building_name, site_name, block_name, address, type,
         ST_Distance(
           geography(ST_MakePoint(longitude, latitude)),
           geography(ST_MakePoint(${lng}, ${lat}))
@@ -493,6 +555,8 @@ export class BuildingsService {
     return buildings.map(b => ({
       id: b.id,
       buildingName: b.building_name,
+      siteName: b.site_name,
+      blockName: b.block_name,
       address: b.address,
       type: b.type || 'residential',
       distance: Math.round(Number(b.distance)),
@@ -516,33 +580,40 @@ export class BuildingsService {
     }
     // AYNI ISIM + YAKIN KONUM KONTROLU (mukerrer apartman engeli)
     // Yaklasik 50m yaricapta ayni isimli apartman varsa engelle
-    const normalize = (s: string) => (s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
     const yakinlik = 0.0027; // ~300 metre (ayni isimli mukerrer bina engeli)
-    const yakinBinalar = await this.prisma.building.findMany({
+    const yakinBinalar = await this.prisma.location.findMany({
       where: {
         type: { not: 'business' },
         latitude: { gte: dto.latitude - yakinlik, lte: dto.latitude + yakinlik },
         longitude: { gte: dto.longitude - yakinlik, lte: dto.longitude + yakinlik },
       },
-      select: { buildingName: true, siteName: true },
+      select: { name: true },
     });
     for (const block of dto.blocks) {
       let yeniAd = dto.siteName || block.blockName || 'Bina';
       if (dto.siteName && block.blockName) yeniAd = `${dto.siteName} ${block.blockName}`;
       else if (block.blockName) yeniAd = block.blockName;
-      const yeniAdNorm = normalize(yeniAd);
-      const siteNorm = normalize(dto.siteName || '');
+      const yeniAdNorm = this.normalize(yeniAd);
+      const siteNorm = this.normalize(dto.siteName || '');
       const cakisma = yakinBinalar.some((b) => {
-        const bAd = normalize(b.buildingName);
-        const bSite = normalize(b.siteName || '');
-        return bAd === yeniAdNorm || (siteNorm && bSite === siteNorm) || (siteNorm && bAd === siteNorm);
+        const bAd = this.normalize(b.name);
+        return bAd === yeniAdNorm || (siteNorm && bAd === siteNorm);
       });
       if (cakisma) {
         return { success: false, message: `Bu konumda "${yeniAd}" adinda kayitli bir bina zaten var. Sakin olarak katilabilir veya isyeri ekleyebilirsiniz.` };
       }
     }
-    // Yapi kuran kisi otomatik yonetici/premium olur (isletme ile tutarli)
-    await this.prisma.user.update({ where: { id: userId }, data: { isPremium: true } });
+
+    const siteLokasyon = await this.prisma.location.create({
+      data: {
+        name: dto.siteName || dto.blocks[0]?.blockName || 'Yapi',
+        type: 'residential',
+        ownerUserId: userId,
+        address: (dto as any).address || null,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+      },
+    });
 
     const createdBuildings: any[] = [];
     for (const block of dto.blocks) {
@@ -555,6 +626,7 @@ export class BuildingsService {
 
       const building = await this.prisma.building.create({
         data: {
+          locationId: siteLokasyon.id,
           buildingName,
           latitude: dto.latitude,
           longitude: dto.longitude,
@@ -595,12 +667,43 @@ export class BuildingsService {
     if (dto.latitude == null || dto.longitude == null) {
       return { success: false, message: 'Konum gerekli' };
     }
-    // Isyeri sahibi otomatik premium (yonetici gibi)
-    await this.prisma.user.update({ where: { id: userId }, data: { isPremium: true } });
 
+    // Ayni konumda ayni isimde isletme var mi? (~150m)
+    const isletmeYakinlik = 0.00135;
+    const yakinIsletmeler = await this.prisma.location.findMany({
+      where: {
+        type: 'business',
+        latitude: { gte: dto.latitude - isletmeYakinlik, lte: dto.latitude + isletmeYakinlik },
+        longitude: { gte: dto.longitude - isletmeYakinlik, lte: dto.longitude + isletmeYakinlik },
+      },
+      select: { id: true, name: true },
+    });
+    const yeniIsim = this.normalize(dto.businessName.trim());
+    const mevcut = yakinIsletmeler.find((b) => this.normalize(b.name) === yeniIsim);
+    if (mevcut) {
+      return {
+        success: false,
+        alreadyExists: true,
+        buildingId: mevcut.id,
+        message: `Bu konumda "${dto.businessName.trim()}" adinda kayitli bir isletme zaten var. Mevcut isletmeye katilabilirsiniz.`,
+      };
+    }
+
+    const isletmeLokasyon = await this.prisma.location.create({
+      data: {
+        name: dto.businessName.trim(),
+        type: 'business',
+        businessCategory: dto.category || null,
+        ownerUserId: userId,
+        address: dto.address || null,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+      },
+    });
     const token = 'DIAFON-' + randomUUID().replace(/-/g, '');
     const building = await this.prisma.building.create({
       data: {
+        locationId: isletmeLokasyon.id,
         buildingName: dto.businessName.trim(),
         latitude: dto.latitude,
         longitude: dto.longitude,
