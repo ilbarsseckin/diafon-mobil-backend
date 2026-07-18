@@ -251,4 +251,256 @@ export class SuperadminService {
     return { success: true, url };
   }
 
+
+  /** Tum lokasyonlar: bina/isletme, sahibi, abonelik durumu, fatura ozeti */
+  async locations() {
+    const locs = await this.prisma.location.findMany({ orderBy: { createdAt: 'desc' } });
+    const result: any[] = [];
+
+    for (const l of locs) {
+      const buildings = await this.prisma.building.findMany({
+        where: { locationId: l.id },
+        select: { id: true, buildingName: true, blockName: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      let unitCount = 0;
+      for (const b of buildings) {
+        unitCount += await this.prisma.apartment.count({ where: { buildingId: b.id } });
+      }
+
+      const owner = l.ownerUserId
+        ? await this.prisma.user.findUnique({
+            where: { id: l.ownerUserId },
+            select: { id: true, name: true, phone: true, email: true },
+          })
+        : null;
+
+      const sub = await this.prisma.subscription.findFirst({
+        where: { locationId: l.id },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      let daysLeft = 0;
+      if (sub) {
+        const end = sub.status === 'trial' ? sub.trialEndsAt : sub.currentPeriodEnd;
+        if (end) daysLeft = Math.max(0, Math.ceil((new Date(end).getTime() - Date.now()) / 86400000));
+      }
+
+      const unpaidInvoices = l.ownerUserId
+        ? await this.prisma.invoice.count({
+            where: { ownerUserId: l.ownerUserId, paymentStatus: { not: 'paid' } },
+          })
+        : 0;
+
+      result.push({
+        id: l.id,
+        name: l.name,
+        type: l.type,
+        businessCategory: l.businessCategory,
+        address: l.address,
+        latitude: l.latitude,
+        longitude: l.longitude,
+        createdAt: l.createdAt,
+        ownerId: owner?.id || null,
+        ownerName: owner?.name || null,
+        ownerPhone: owner?.phone || null,
+        ownerEmail: owner?.email || null,
+        blockCount: buildings.length,
+        unitCount,
+        blocks: buildings.map((b) => ({ id: b.id, name: b.blockName || b.buildingName })),
+        subscription: sub
+          ? {
+              id: sub.id,
+              status: sub.status,
+              daysLeft,
+              monthlyPrice: sub.monthlyPrice,
+              periodEnd: sub.status === 'trial' ? sub.trialEndsAt : sub.currentPeriodEnd,
+            }
+          : null,
+        unpaidInvoices,
+      });
+    }
+    return result;
+  }
+
+
+  /** Tek lokasyonun tum detayi: bloklar, sakinler, faturalar, abonelik */
+  async locationDetail(id: string) {
+    const l = await this.prisma.location.findUnique({ where: { id } });
+    if (!l) return { success: false, message: 'Lokasyon bulunamadi' };
+
+    const owner = l.ownerUserId
+      ? await this.prisma.user.findUnique({
+          where: { id: l.ownerUserId },
+          select: { id: true, name: true, phone: true, email: true, createdAt: true },
+        })
+      : null;
+
+    const buildings = await this.prisma.building.findMany({
+      where: { locationId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const bloklar: any[] = [];
+    let unitCount = 0;
+    let residentCount = 0;
+    for (const b of buildings) {
+      const apts = await this.prisma.apartment.findMany({
+        where: { buildingId: b.id },
+        select: { id: true },
+      });
+      unitCount += apts.length;
+      const rc = apts.length
+        ? await this.prisma.resident.count({ where: { apartmentId: { in: apts.map((a) => a.id) } } })
+        : 0;
+      residentCount += rc;
+      bloklar.push({
+        id: b.id,
+        name: b.blockName || b.buildingName,
+        fullName: b.buildingName,
+        qrToken: b.qrToken,
+        unitCount: apts.length,
+        residentCount: rc,
+        requireApproval: b.requireApproval,
+      });
+    }
+
+    const sub = await this.prisma.subscription.findFirst({
+      where: { locationId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+    let daysLeft = 0;
+    if (sub) {
+      const end = sub.status === 'trial' ? sub.trialEndsAt : sub.currentPeriodEnd;
+      if (end) daysLeft = Math.max(0, Math.ceil((new Date(end).getTime() - Date.now()) / 86400000));
+    }
+
+    const invoices = l.ownerUserId
+      ? await this.prisma.invoice.findMany({
+          where: { ownerUserId: l.ownerUserId },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        })
+      : [];
+
+    // Son cagrilar
+    const callCount = buildings.length
+      ? await this.prisma.call.count({ where: { buildingId: { in: buildings.map((b) => b.id) } } })
+      : 0;
+
+    return {
+      success: true,
+      id: l.id,
+      name: l.name,
+      type: l.type,
+      businessCategory: l.businessCategory,
+      address: l.address,
+      latitude: l.latitude,
+      longitude: l.longitude,
+      createdAt: l.createdAt,
+      owner,
+      blocks: bloklar,
+      blockCount: bloklar.length,
+      unitCount,
+      residentCount,
+      callCount,
+      subscription: sub
+        ? {
+            id: sub.id,
+            status: sub.status,
+            daysLeft,
+            monthlyPrice: sub.monthlyPrice,
+            flatCount: sub.flatCount,
+            plan: sub.plan,
+            trialEndsAt: sub.trialEndsAt,
+            currentPeriodEnd: sub.currentPeriodEnd,
+          }
+        : null,
+      invoices: invoices.map((i) => ({
+        id: i.id,
+        title: i.title,
+        amount: i.amount,
+        paymentStatus: i.paymentStatus,
+        sentAt: i.sentAt,
+        fileUrl: i.fileUrl,
+        createdAt: i.createdAt,
+      })),
+    };
+  }
+
+
+  /** Musteriler: lokasyon veya arac sahibi olan kullanicilar */
+  async owners() {
+    const users = await this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, phone: true, email: true, createdAt: true, blocked: true },
+    });
+
+    const result: any[] = [];
+    for (const u of users) {
+      const locs = await this.prisma.location.findMany({
+        where: { ownerUserId: u.id },
+        select: { id: true, name: true, type: true },
+      });
+      const vehicles = await this.prisma.vehicle.findMany({
+        where: { ownerUserId: u.id },
+        select: { id: true, code: true, plate: true, label: true, status: true },
+      });
+
+      // Sadece sahibi olanlar musteri sayilir
+      if (locs.length === 0 && vehicles.length === 0) continue;
+
+      const subs = await this.prisma.subscription.findMany({
+        where: { ownerUserId: u.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const now = Date.now();
+      const varliklar: any[] = [];
+      let aylikToplam = 0;
+
+      for (const l of locs) {
+        const s = subs.find((x) => x.locationId === l.id);
+        let daysLeft = 0;
+        if (s) {
+          const end = s.status === 'trial' ? s.trialEndsAt : s.currentPeriodEnd;
+          if (end) daysLeft = Math.max(0, Math.ceil((new Date(end).getTime() - now) / 86400000));
+          aylikToplam += s.monthlyPrice || 0;
+        }
+        varliklar.push({
+          kind: 'location', id: l.id, name: l.name,
+          type: l.type === 'business' ? 'Isletme' : 'Apartman',
+          status: s?.status || null, daysLeft, monthlyPrice: s?.monthlyPrice || 0,
+        });
+      }
+
+      for (const v of vehicles) {
+        const s = subs.find((x) => x.vehicleId === v.id);
+        let daysLeft = 0;
+        if (s?.currentPeriodEnd) {
+          daysLeft = Math.max(0, Math.ceil((new Date(s.currentPeriodEnd).getTime() - now) / 86400000));
+        }
+        varliklar.push({
+          kind: 'vehicle', id: v.id, name: v.plate || v.label || v.code,
+          type: 'Arac', status: s?.status || v.status, daysLeft, monthlyPrice: s?.monthlyPrice || 0,
+        });
+      }
+
+      const unpaid = await this.prisma.invoice.count({
+        where: { ownerUserId: u.id, paymentStatus: { not: 'paid' } },
+      });
+
+      result.push({
+        id: u.id, name: u.name, phone: u.phone, email: u.email,
+        createdAt: u.createdAt, blocked: u.blocked,
+        assets: varliklar,
+        assetCount: varliklar.length,
+        locationCount: locs.length,
+        vehicleCount: vehicles.length,
+        monthlyTotal: aylikToplam,
+        unpaidInvoices: unpaid,
+      });
+    }
+    return result;
+  }
+
 }

@@ -48,7 +48,7 @@ export class BuildingsController {
     if (isNaN(latNum) || isNaN(lngNum)) {
       throw new BadRequestException('Konum gerekli');
     }
-    return this.service.nearbyBuildings(latNum, lngNum);
+    return this.service.nearbyLocations(latNum, lngNum);
   }
   // --- Herkese acik: web'den telefon ile katilim ---
   @Post('web-join')
@@ -496,6 +496,7 @@ export class BuildingsController {
     const qr = 'DIAFON-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     const newBuilding = await this.prisma.building.create({
       data: {
+        locationId: ref.locationId,
         buildingName: (ref.siteName || ref.buildingName) + ' ' + blockName,
         latitude: ref.latitude, longitude: ref.longitude, radiusMeter: ref.radiusMeter,
         siteName: ref.siteName, blockName, ownerUserId: req.user.userId,

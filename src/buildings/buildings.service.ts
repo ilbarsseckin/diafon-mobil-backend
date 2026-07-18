@@ -536,6 +536,58 @@ export class BuildingsService {
     return result;
   }
 
+  /** Yakindaki LOKASYONLAR (site/isletme) + bloklari */
+  async nearbyLocations(lat: number, lng: number, radiusMeters = 150) {
+    const rows = await this.prisma.$queryRaw<any[]>`
+      SELECT id, name, type, business_category, address,
+        ST_Distance(
+          geography(ST_MakePoint(longitude, latitude)),
+          geography(ST_MakePoint(${lng}, ${lat}))
+        ) AS distance
+      FROM locations
+      WHERE ST_DWithin(
+        geography(ST_MakePoint(longitude, latitude)),
+        geography(ST_MakePoint(${lng}, ${lat})),
+        ${radiusMeters}
+      )
+      ORDER BY distance ASC
+      LIMIT 10
+    `;
+
+    const result: any[] = [];
+    for (const r of rows) {
+      const blocks = await this.prisma.building.findMany({
+        where: { locationId: r.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, buildingName: true, blockName: true },
+      });
+      const bloklar: any[] = [];
+      let toplamDaire = 0;
+      for (const b of blocks) {
+        const daire = await this.prisma.apartment.count({ where: { buildingId: b.id } });
+        toplamDaire += daire;
+        bloklar.push({
+          id: b.id,
+          name: b.blockName || b.buildingName,
+          fullName: b.buildingName,
+          flatCount: daire,
+        });
+      }
+      result.push({
+        id: r.id,
+        name: r.name,
+        type: r.type || 'residential',
+        businessCategory: r.business_category || null,
+        address: r.address || null,
+        distance: Math.round(Number(r.distance)),
+        blockCount: bloklar.length,
+        unitCount: toplamDaire,
+        blocks: bloklar,
+      });
+    }
+    return result;
+  }
+
   async nearbyBuildings(lat: number, lng: number, radiusMeters = 150) {
     const buildings = await this.prisma.$queryRaw<any[]>`
       SELECT id, building_name, site_name, block_name, address, type,

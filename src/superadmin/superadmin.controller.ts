@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Headers, Res, UnauthorizedException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Headers, Res, UnauthorizedException, Param } from '@nestjs/common';
 import type { Response } from 'express';
 import { SuperadminService } from './superadmin.service';
 import { PushService } from '../calls/push.service';
@@ -59,6 +59,27 @@ export class SuperadminController {
     return this.service.overview();
   }
 
+  @Get('owners')
+  async owners(@Headers('authorization') auth: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.service.owners();
+  }
+  @Get('locations')
+  async locations(@Headers('authorization') auth: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.service.locations();
+  }
+  @Get('locations/:id')
+  async locationDetail(@Headers('authorization') auth: string, @Param('id') id: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.service.locationDetail(id);
+  }
   @Get('vehicle-orders')
   async vehicleOrders(@Headers('authorization') auth: string) {
     const token = (auth || '').replace('Bearer ', '');
