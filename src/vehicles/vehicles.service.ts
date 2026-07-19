@@ -67,6 +67,20 @@ export class VehiclesService {
     if (vehicle.status !== 'active') {
       return { found: false, message: 'Arac aktif degil' };
     }
+    // Abonelik suresi doldu mu?
+    const sub = await this.prisma.subscription.findFirst({
+      where: { vehicleId: vehicle.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const bitis = sub?.currentPeriodEnd;
+    const suresiVar = bitis ? new Date(bitis).getTime() > Date.now() : false;
+    if (!suresiVar || sub?.status === 'cancelled' || sub?.status === 'expired') {
+      return {
+        found: false,
+        expired: true,
+        message: 'Bu QR kodun aboneligi sona ermis. Arac sahibiyseniz uygulamadan yenileyebilirsiniz.',
+      };
+    }
     const owner = await this.prisma.user.findUnique({
       where: { id: vehicle.ownerUserId },
       select: { id: true, name: true, photoUrl: true, isOnline: true },
@@ -100,6 +114,17 @@ export class VehiclesService {
     if (!vehicle || vehicle.status !== 'active' || !vehicle.ownerUserId) {
       return { success: false, message: 'Arac bulunamadi' };
     }
+    // Abonelik suresi kontrolu
+    const rSub = await this.prisma.subscription.findFirst({
+      where: { vehicleId: vehicle.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const rBitis = rSub?.currentPeriodEnd;
+    const rGecerli = rBitis ? new Date(rBitis).getTime() > Date.now() : false;
+    if (!rGecerli || rSub?.status === 'cancelled' || rSub?.status === 'expired') {
+      return { success: false, expired: true, message: 'Bu QR kodun aboneligi sona ermis' };
+    }
+
     const links = await this.prisma.vehicleUser.findMany({ where: { vehicleId: vehicle.id }, select: { userId: true } });
     const targetIds = [...new Set([vehicle.ownerUserId, ...links.map(l => l.userId)])] as string[];
     try {

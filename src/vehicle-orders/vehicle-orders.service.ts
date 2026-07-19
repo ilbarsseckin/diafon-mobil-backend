@@ -22,14 +22,43 @@ export class VehicleOrdersService {
     return parseInt(process.env.VEHICLE_PRODUCT_PRICE || '790', 10);
   }
 
+  /** Adede gore birim fiyat (kademeli) */
+  private unitPriceFor(qty: number): number {
+    if (qty >= 10) return 590;
+    if (qty >= 3) return 650;
+    if (qty >= 2) return 700;
+    return 790;
+  }
+
+  /** Kargo: 2 ve uzeri ucretsiz */
+  private shippingFor(qty: number): number {
+    return qty >= 2 ? 0 : 120;
+  }
+
+  /** Panelde/formda gostermek icin fiyat ozeti */
+  priceQuote(qty: number) {
+    const adet = Math.min(Math.max(Math.floor(qty || 1), 1), 24);
+    const birim = this.unitPriceFor(adet);
+    const kargo = this.shippingFor(adet);
+    return {
+      quantity: adet,
+      unitPrice: birim,
+      subtotal: birim * adet,
+      shippingFee: kargo,
+      total: birim * adet + kargo,
+    };
+  }
+
   async initialize(data: {
     buyerName: string; buyerPhone: string; buyerEmail?: string;
     shipCity: string; shipDistrict?: string; shipAddress: string; buyerUserId?: string;
+    quantity?: number;
   }) {
     if (!data.buyerName?.trim() || !data.buyerPhone?.trim() || !data.shipAddress?.trim() || !data.shipCity?.trim()) {
       throw new BadRequestException('Ad, telefon, il ve adres zorunlu');
     }
-    const amount = this.price();
+    const q = this.priceQuote(data.quantity || 1);
+    const amount = q.total;
     const conversationId = `vorder_${Date.now()}`;
     const order = await this.prisma.vehicleOrder.create({
       data: {
@@ -40,6 +69,9 @@ export class VehicleOrdersService {
         shipDistrict: data.shipDistrict?.trim() || null,
         shipAddress: data.shipAddress.trim(),
         amount,
+        quantity: q.quantity,
+        unitPrice: q.unitPrice,
+        shippingFee: q.shippingFee,
         status: 'pending',
         conversationId,
         buyerUserId: data.buyerUserId || null,
@@ -195,11 +227,15 @@ export class VehicleOrdersService {
       return { canCancel: false, canRefund: false, amount: 0, reason: 'Iade suresi doldu (' + days + ' gun oldu)' };
     }
     const shipped = order.shipStatus === 'shipped';
+    const adet = order.quantity || 1;
+    const etiketBedeli = this.TAG_AMOUNT * adet;
     return {
       canCancel: false,
       canRefund: true,
-      amount: shipped ? order.amount - this.TAG_AMOUNT : order.amount,
-      reason: shipped ? ('Kargolandi, ' + this.TAG_AMOUNT + ' TL etiket bedeli kesilir') : 'Kargolanmadi, tam iade',
+      amount: shipped ? Math.max(0, order.amount - etiketBedeli) : order.amount,
+      reason: shipped
+        ? ('Kargolandi, ' + adet + ' x ' + this.TAG_AMOUNT + ' = ' + etiketBedeli + ' TL etiket bedeli kesilir')
+        : 'Kargolanmadi, tam iade',
     };
   }
 
