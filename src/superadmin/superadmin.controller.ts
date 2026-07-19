@@ -184,7 +184,9 @@ export class SuperadminController {
     if (token !== expected) { res.status(401).json({ message: 'Yetkisiz' }); return; }
     const cards = body.cards || [];
     if (cards.length === 0) { res.status(400).json({ message: 'Kart listesi bos' }); return; }
-    const pdf = body.format === 'single'
+    const pdf = body.format === 'production'
+      ? await this.labelService.generateProduction(cards)
+      : body.format === 'single'
       ? await this.labelService.generateSingle(cards)
       : await this.labelService.generateA4(cards);
     res.setHeader('Content-Type', 'application/pdf');

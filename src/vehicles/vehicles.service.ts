@@ -29,7 +29,7 @@ export class VehiclesService {
 
   // SUPERADMIN: N adet sahipsiz kart uret. secretCode'lar duz metin BIR KEZ doner.
   async generateBatch(count: number) {
-    const n = Math.min(Math.max(Math.floor(count || 0), 1), 500);
+    const n = Math.min(Math.max(Math.floor(count || 0), 1), 1000);
     const cards: { code: string; secretCode: string }[] = [];
     for (let i = 0; i < n; i++) {
       const code = await this.generateUniqueCode();
@@ -136,6 +136,9 @@ export class VehiclesService {
   async activate(userId: string, code: string, secretCode: string, label?: string, plate?: string) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { code } });
     if (!vehicle) throw new NotFoundException('Arac bulunamadi');
+    if (vehicle.status === 'burned') {
+      throw new BadRequestException('Bu kart iptal edilmis, kullanilamaz');
+    }
     if (vehicle.ownerUserId || vehicle.status === 'active') {
       throw new BadRequestException('Bu kart zaten aktive edilmis');
     }
