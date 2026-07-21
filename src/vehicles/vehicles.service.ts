@@ -1,6 +1,5 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushService } from '../calls/push.service';
 
@@ -12,6 +11,19 @@ function randomFrom(alphabet: string, len: number): string {
   let out = '';
   for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
   return out;
+}
+
+// Aktivasyon kodu havuzu icin DETERMINISTIK hash.
+// bcrypt kullanilamaz: her seferinde farkli cikti verdigi icin
+// "bu kod havuzda var mi" diye SORGULANAMAZ; 1000 satirla tek tek
+// karsilastirmak gerekirdi (~100sn). sha256 index'lenir, tek sorgu.
+// Kodlar yuksek entropili rastgele uretildigi icin bu yeterli.
+function hashActivation(secretCode: string): string {
+  const pepper = process.env.ACTIVATION_PEPPER;
+  if (!pepper) throw new Error('ACTIVATION_PEPPER tanimli degil');
+  return createHash('sha256')
+    .update(secretCode.trim().toUpperCase() + pepper, 'utf8')
+    .digest('hex');
 }
 
 @Injectable()
@@ -27,21 +39,55 @@ export class VehiclesService {
     throw new BadRequestException('Kod uretilemedi, tekrar deneyin');
   }
 
-  // SUPERADMIN: N adet sahipsiz kart uret. secretCode'lar duz metin BIR KEZ doner.
-  async generateBatch(count: number) {
+  // Havuza yeni bir aktivasyon kodu ekler, duz metnini dondurur.
+  private async yeniAktivasyonKodu(batchName: string): Promise<string> {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const candidate = randomFrom(ALPHABET, 8);
+      const exists = await this.prisma.activationCode.findUnique({
+        where: { codeHash: hashActivation(candidate) },
+      });
+      if (!exists) {
+        await this.prisma.activationCode.create({
+          data: { codeHash: hashActivation(candidate), batch: batchName },
+        });
+        return candidate;
+      }
+    }
+    throw new BadRequestException('Aktivasyon kodu uretilemedi');
+  }
+
+  // SUPERADMIN: N adet QR + N adet aktivasyon kodu uretir.
+  // IKISI BIRBIRINE BAGLI DEGILDIR. Hangi kagit hangi etiketle kutuya
+  // girdigi onemsizdir. Duz kodlar SADECE burada, BIR KEZ doner.
+  async generateBatch(count: number, batch?: string) {
     const n = Math.min(Math.max(Math.floor(count || 0), 1), 1000);
-    const cards: { code: string; secretCode: string }[] = [];
+    const batchName = batch?.trim() || 'parti-' + new Date().toISOString().slice(0, 10);
+
+    // A) QR havuzu
+    const qrCodes: string[] = [];
     for (let i = 0; i < n; i++) {
       const code = await this.generateUniqueCode();
-      const secretCode = randomFrom(ALPHABET, 8);
-      const secretCodeHash = await bcrypt.hash(secretCode, 10);
       await this.prisma.vehicle.create({
-        data: { ownerUserId: null, code, secretCodeHash, status: 'unsold' },
+        data: { ownerUserId: null, code, secretCodeHash: null, status: 'unsold' },
       });
-      cards.push({ code, secretCode });
+      qrCodes.push(code);
     }
-    const csv = 'code,secretCode\n' + cards.map(c => c.code + ',' + c.secretCode).join('\n');
-    return { count: n, cards, csv };
+
+    // B) Aktivasyon kodu havuzu (QR'lardan bagimsiz)
+    const secrets: string[] = [];
+    for (let i = 0; i < n; i++) {
+      secrets.push(await this.yeniAktivasyonKodu(batchName));
+    }
+
+    return {
+      count: n,
+      batch: batchName,
+      qrCodes,
+      secrets,
+      qrCsv: 'code\n' + qrCodes.join('\n'),
+      secretCsv: 'secretCode\n' + secrets.join('\n'),
+      warning: 'Aktivasyon kodlari BIR DAHA gosterilmez. Simdi kaydedin.',
+    };
   }
 
   async findMine(userId: string) {
@@ -139,26 +185,31 @@ export class VehiclesService {
     return { success: true, message: 'Arac sahibine bildirim gonderildi' };
   }
 
-  // SUPERADMIN: kartin gizli kodunu sifirla, yeni kodu bir kez dondur
-  async resetSecretCode(code: string) {
-    const vehicle = await this.prisma.vehicle.findUnique({ where: { code } });
-    if (!vehicle) return { success: false, message: 'Kart bulunamadi' };
-    const secretCode = randomFrom(ALPHABET, 8);
-    const secretCodeHash = await bcrypt.hash(secretCode, 10);
-    await this.prisma.vehicle.update({
-      where: { id: vehicle.id },
-      data: { secretCodeHash },
-    });
+  // SUPERADMIN: havuza YENI bir aktivasyon kodu ekler.
+  // ESKI ANLAMI DEGISTI: kod artik belirli bir karta ait olmadigi icin
+  // "bu kartin kodunu sifirla" diye bir sey yok. Musteri kodunu
+  // kaybettiyse buradan yeni kod uretip verirsin.
+  async issueActivationCode(batch?: string) {
+    const batchName = batch?.trim() || 'destek-' + new Date().toISOString().slice(0, 10);
+    const secretCode = await this.yeniAktivasyonKodu(batchName);
     return {
       success: true,
-      code: vehicle.code,
-      secretCode, // duz metin, bir kez
-      message: 'Gizli kod sifirlandi. Yeni kodu musteriye verin.',
+      secretCode, // duz metin, BIR KEZ
+      batch: batchName,
+      message: 'Yeni aktivasyon kodu uretildi. Bir daha gosterilmez.',
     };
   }
 
-  // Gizli kod ile aktivasyon: aracı aktive edene baglar + 1 yillik auto aboneligi acar.
-  async activate(userId: string, code: string, secretCode: string, label?: string, plate?: string) {
+  // Aktivasyon: QR + havuzdan HERHANGI bir kullanilmamis kod + e-posta.
+  // Kod ile QR arasinda onceden bir bag YOKTUR; bag burada kurulur.
+  async activate(
+    userId: string,
+    code: string,
+    secretCode: string,
+    email?: string,
+    label?: string,
+    plate?: string,
+  ) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { code } });
     if (!vehicle) throw new NotFoundException('Arac bulunamadi');
     if (vehicle.status === 'burned') {
@@ -167,49 +218,92 @@ export class VehiclesService {
     if (vehicle.ownerUserId || vehicle.status === 'active') {
       throw new BadRequestException('Bu kart zaten aktive edilmis');
     }
-    const ok = await bcrypt.compare(secretCode, vehicle.secretCodeHash);
-    if (!ok) throw new BadRequestException('Gizli kod hatali');
 
-    // Araci aktive edene bagla
-    const updated = await this.prisma.vehicle.update({
-      where: { id: vehicle.id },
-      data: {
-        ownerUserId: userId,
-        label: label?.trim() || vehicle.label || null,
-        plate: plate?.trim() || vehicle.plate || null,
-        status: 'active',
-      },
-    });
+    const codeHash = hashActivation(secretCode);
+    const act = await this.prisma.activationCode.findUnique({ where: { codeHash } });
+    if (!act) throw new BadRequestException('Gizli kod hatali');
+    if (act.used) throw new BadRequestException('Bu kod daha once kullanilmis');
 
-    const scopeName = updated.label || updated.plate || updated.code;
+    const cleanEmail = email?.trim().toLowerCase() || null;
 
-    // Idempotent: bu arac icin auto aboneligi zaten var mi?
-    let sub = await this.prisma.subscription.findFirst({
-      where: { ownerUserId: userId, scopeType: 'auto', vehicleId: updated.id },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!sub) {
-      const periodEnd = new Date(Date.now() + AUTO_SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000);
-      sub = await this.prisma.subscription.create({
+    return this.prisma.$transaction(async (tx) => {
+      // Kodu KOSULLU sahiplen. Iki istek ayni anda gelirse sadece biri
+      // count=1 alir, digeri 0 -> yaris durumu veritabaninda cozulur.
+      const claimed = await tx.activationCode.updateMany({
+        where: { codeHash, used: false },
         data: {
-          ownerUserId: userId,
-          scopeType: 'auto',
-          scopeName,
-          vehicleId: updated.id,
-          status: 'active',
-          flatCount: 0,
-          monthlyPrice: 0, // kart alinirken 1 yillik pesin odendi
-          currentPeriodEnd: periodEnd,
+          used: true,
+          usedVehicleId: vehicle.id,
+          usedUserId: userId,
+          usedAt: new Date(),
         },
       });
-    }
+      if (claimed.count === 0) {
+        throw new BadRequestException('Bu kod daha once kullanilmis');
+      }
 
-    return {
-      success: true,
-      message: 'Arac aktive edildi',
-      vehicle: { id: updated.id, label: updated.label, plate: updated.plate, code: updated.code, status: updated.status },
-      subscription: { id: sub.id, status: sub.status, currentPeriodEnd: sub.currentPeriodEnd },
-    };
+      // Araci da KOSULLU sahiplen
+      const vClaimed = await tx.vehicle.updateMany({
+        where: { id: vehicle.id, ownerUserId: null },
+        data: {
+          ownerUserId: userId,
+          label: label?.trim() || vehicle.label || null,
+          plate: plate?.trim() || vehicle.plate || null,
+          status: 'active',
+        },
+      });
+      if (vClaimed.count === 0) {
+        throw new BadRequestException('Bu kart zaten aktive edilmis');
+      }
+
+      const updated: any = await tx.vehicle.findUnique({ where: { id: vehicle.id } });
+
+      // E-posta: hesapta yoksa yaz. Numara degisirse kurtarma kanali bu.
+      if (cleanEmail) {
+        const user: any = await tx.user.findUnique({ where: { id: userId } });
+        if (user && !user.email) {
+          await tx.user.update({
+            where: { id: userId },
+            data: { email: cleanEmail, emailVerified: false },
+          });
+        }
+      }
+
+      const scopeName = updated.label || updated.plate || updated.code;
+
+      // Idempotent: bu arac icin auto aboneligi zaten var mi?
+      let sub: any = await tx.subscription.findFirst({
+        where: { ownerUserId: userId, scopeType: 'auto', vehicleId: updated.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!sub) {
+        const periodEnd = new Date(Date.now() + AUTO_SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000);
+        sub = await tx.subscription.create({
+          data: {
+            ownerUserId: userId,
+            scopeType: 'auto',
+            scopeName,
+            vehicleId: updated.id,
+            status: 'active',
+            flatCount: 0,
+            monthlyPrice: 0, // kart alinirken 1 yillik pesin odendi
+            currentPeriodEnd: periodEnd,
+          },
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Arac aktive edildi',
+        vehicle: {
+          id: updated.id, label: updated.label, plate: updated.plate,
+          code: updated.code, status: updated.status,
+        },
+        subscription: {
+          id: sub.id, status: sub.status, currentPeriodEnd: sub.currentPeriodEnd,
+        },
+      };
+    });
   }
 
   async setVehicleActive(userId: string, id: string, active: boolean) {
@@ -231,9 +325,8 @@ export class VehiclesService {
     return { message: 'Arac silindi' };
   }
 
-  // SUPERADMIN: etiket icin kart bilgisi. NOT: secretCode hash'li saklandigindan
-  // mevcut kartlarin duz gizli kodu YOKTUR. Bu yuzden etiket ancak URETIM aninda
-  // (duz kodlar eldeyken) basilabilir. Stok icin: gizli kodu sifirlayip yeni kod uret.
+  // SUPERADMIN: etiket basimi icin satilmamis QR kodlari.
+  // Artik gizli kod ile bagli olmadigi icin etiket ISTEDIGIN ZAMAN basilabilir.
   async getUnsoldCodes(): Promise<{ code: string }[]> {
     const vehicles = await this.prisma.vehicle.findMany({
       where: { status: 'unsold' },
@@ -241,6 +334,13 @@ export class VehiclesService {
       orderBy: { createdAt: 'desc' },
     });
     return vehicles;
+  }
+
+  // SUPERADMIN: aktivasyon kodu havuzunun durumu
+  async activationPoolStatus() {
+    const total = await this.prisma.activationCode.count();
+    const used = await this.prisma.activationCode.count({ where: { used: true } });
+    return { total, used, available: total - used };
   }
 
   // SUPERADMIN: tum kartlar + ozet
