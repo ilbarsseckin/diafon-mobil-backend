@@ -12,6 +12,7 @@ model User {
   name          String
   phone         String     @unique
   email         String?
+  emailVerified Boolean    @default(false) @map("email_verified")
   role          UserRole   @default(GUEST)
   photoUrl      String?    @map("photo_url")
   phoneVerified Boolean    @default(false) @map("phone_verified")
@@ -26,6 +27,7 @@ model User {
   receiverCalls Call[]     @relation("ReceiverUser")
   residents     Resident[]
   vehicleLinks  VehicleUser[]
+  activationCodes ActivationCode[]
   @@map("users")
 }
 
@@ -61,15 +63,13 @@ model Building {
   imageUrl             String?     @map("image_url")
   locationCheckEnabled Boolean     @default(false) @map("location_check_enabled")
   locationCheckRadius  Int         @default(150) @map("location_check_radius")
-  doorAdapter          String?     @map("door_adapter")
-  doorDeviceId         String?     @map("door_device_id")
-  doorEnabled          Boolean     @default(false) @map("door_enabled")
   type                 String      @default("residential")
   businessCategory     String?     @map("business_category")
   securityMode         String      @default("qr") @map("security_mode")
   locationId           String?     @map("location_id")
   location             Location?   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   apartments           Apartment[]
+  doors                Door[]
   calls                Call[]
   @@map("buildings")
 }
@@ -137,14 +137,18 @@ model Note {
 }
 
 model Door {
+  pulseSeconds Int?    @default(2) @map("pulse_seconds")
   id         String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   buildingId String   @map("building_id")
   name       String
   adapter    String   @default("tuya")
   deviceId   String   @map("device_id")
+  dpCode     String?  @map("dp_code")
   enabled    Boolean  @default(true)
   sortOrder  Int      @default(0) @map("sort_order")
   createdAt  DateTime @default(now()) @map("created_at")
+  building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+
   @@index([buildingId], map: "idx_doors_building")
   @@map("doors")
 }
@@ -267,13 +271,12 @@ model Vehicle {
   label          String?
   plate          String?
   code           String   @unique
-  secretCodeHash String   @map("secret_code_hash")
+  secretCodeHash String?  @map("secret_code_hash")
   status         String   @default("unsold")
   activeMessage  String?  @map("active_message")
   createdAt      DateTime @default(now()) @map("created_at")
-
   secondaryUsers VehicleUser[]
-
+  activationCodes ActivationCode[]
   @@index([ownerUserId], map: "idx_vehicles_owner")
   @@map("vehicles")
 }
@@ -323,3 +326,33 @@ model VehicleOrder {
   @@map("vehicle_orders")
 }
 
+model ActivationCode {
+  id            String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  codeHash      String    @unique @map("code_hash")
+  batch         String?
+  used          Boolean   @default(false)
+  usedVehicleId String?   @map("used_vehicle_id")
+  usedUserId    String?   @map("used_user_id")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  usedVehicle   Vehicle?  @relation(fields: [usedVehicleId], references: [id])
+  usedUser      User?     @relation(fields: [usedUserId], references: [id])
+
+  @@map("activation_codes")
+}
+
+// 0850 maskeli arama: dahili kod -> aranacak numara eslemesi
+// tip: "daire" | "arac". Kod, QR/liste sayfasinda tel: linkine gomulur.
+model CallCode {
+  id         String   @id @default(uuid())
+  code       String   @unique // tuslanan kod, or. "2002"
+  type       String   // daire | arac
+  label      String   // TTS'in okuyacagi ad, or. "Daire 2"
+  phone      String   // yonlendirilecek numara, 05xx
+  buildingId String?  @map("building_id")
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("call_codes")
+}

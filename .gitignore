@@ -10,3 +10,8 @@ firebase-admin.json
 uploads/
 *.bak
 *.bak-*
+
+# Okuyarak calisirken alinan yedekler - git'e girmesin
+*.bak
+*.bak.*
+*.bak-*

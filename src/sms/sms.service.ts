@@ -10,7 +10,16 @@ export class SmsService {
 
   async send(phone: string, message: string): Promise<boolean> {
     const gsm = phone.replace(/^\+/, '').replace(/^0/, '90');
-    const path = `/sms/send/get/?usercode=${this.username}&password=${this.password}&gsmno=${gsm}&message=${encodeURIComponent(message)}&msgheader=${this.header}`;
+    // TUM parametreler encode edilir. Sifrede & # + % gibi karakter varsa
+    // encode edilmezse URL parcalanir ve NetGSM 30 (yetkisiz) doner.
+    const q = new URLSearchParams({
+      usercode: this.username,
+      password: this.password,
+      gsmno: gsm,
+      message: message,
+      msgheader: this.header,
+    }).toString();
+    const path = `/sms/send/get/?${q}`;
 
     return new Promise((resolve) => {
       const options = {
@@ -49,7 +58,7 @@ export class SmsService {
   }
 
   async sendOtp(phone: string, code: string): Promise<void> {
-    const msg = `Diafon dogrulama kodunuz: ${code}`;
+    const msg = `MobilDiafon dogrulama kodunuz: ${code}`;
     await this.send(phone, msg);
   }
 }

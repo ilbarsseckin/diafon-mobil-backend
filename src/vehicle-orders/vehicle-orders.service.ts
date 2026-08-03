@@ -141,8 +141,8 @@ export class VehicleOrdersService {
         let vcode: string | null = null, vsecret: string | null = null;
         try {
           const batch = await this.vehicles.generateBatch(1);
-          vcode = batch.cards[0].code;
-          vsecret = batch.cards[0].secretCode;
+          vcode = batch.qrCodes[0];
+          vsecret = batch.secrets[0];
         } catch (e) {
           this.logger.error('arac kodu uretilemedi: ' + e);
         }

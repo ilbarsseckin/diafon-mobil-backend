@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 
+
+const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 7);
+
 function pricePerFlat(count: number): number {
   if (count <= 20) return 15;
   if (count <= 60) return 13;
@@ -16,8 +19,20 @@ export class SuperadminService {
   // Genel bakis: KPI + grafik verileri
   async overview() {
     const { customers } = await this.customers();
+    // Lokasyon bazli gercek abonelik tablosu (auto = arac kaydi, musteri degil)
+    const locSubs = await this.prisma.subscription.findMany({
+      where: { scopeType: { not: 'auto' } },
+    });
+    const nowT = new Date();
+    const activeSubs = locSubs.filter(x => x.status === 'active');
+    const trialSubs = locSubs.filter(x => x.status === 'trial');
+    const mrr = activeSubs.reduce((t: number, x: any) => t + (x.monthlyPrice || 0), 0);
+    const potential = trialSubs.reduce((t: number, x: any) => t + (x.monthlyPrice || 0), 0);
+    const expiring = trialSubs
+      .filter(x => x.trialEndsAt)
+      .map(x => ({ id: x.id, days: Math.ceil((new Date(x.trialEndsAt as any).getTime() - nowT.getTime()) / 86400000) }))
+      .sort((p, q) => p.days - q.days);
     const active = customers.filter((c: any) => c.status === 'active');
-    const mrr = active.reduce((s: number, c: any) => s + c.mrr, 0);
 
     // Son 12 ay yeni kayit (signups) - User.createdAt'tan
     const now = new Date();
@@ -32,20 +47,23 @@ export class SuperadminService {
       months.push(monthNames[d.getMonth()]);
       signups.push(allUsers.filter(u => u.createdAt >= d && u.createdAt < next).length);
       // Gelir: basit - su anki MRR'i son aya koy, oncekiler kademeli (gercek gecmis yok)
-      revenue.push(i === 0 ? mrr / 1000 : 0);
+      revenue.push(i === 0 ? mrr : 0);
     }
 
     // Plan dagilimi (scopeType bazli: site/bireysel) - subscription'lardan
     const subs = await this.prisma.subscription.findMany();
     const siteCount = subs.filter(s => s.scopeType === 'site').length;
     const indCount = subs.filter(s => s.scopeType === 'individual').length;
+    const autoCount = subs.filter(s => s.scopeType === 'auto').length;
 
     return {
       kpi: {
-        total: customers.length,
-        active: active.length,
-        trial: customers.filter((c: any) => c.status === 'trial').length,
-        cancelled: customers.filter((c: any) => c.status === 'cancelled').length,
+        total: locSubs.length,
+        active: activeSubs.length,
+        trial: trialSubs.length,
+        cancelled: locSubs.filter(x => x.status === 'expired' || x.status === 'cancelled').length,
+        potential,
+        nextExpiryDays: expiring.length ? expiring[0].days : null,
         mrr,
         buildings: customers.reduce((s: number, c: any) => s + c.buildings, 0),
         flats: customers.reduce((s: number, c: any) => s + c.flats, 0),
@@ -54,7 +72,7 @@ export class SuperadminService {
       months,
       signups,
       revenue,
-      plans: { site: siteCount, individual: indCount },
+      plans: { site: siteCount, individual: indCount, auto: autoCount },
     };
   }
 
@@ -71,7 +89,7 @@ export class SuperadminService {
       return { success: true, message: 'Hesap ucretsiz (sinirsiz) yapildi' };
     } else {
       // Geri al: trial'a dondur (14 gun)
-      const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+      const trialEnd = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
       await this.prisma.subscription.updateMany({
         where: { ownerUserId: ownerId },
         data: { status: 'trial', trialEndsAt: trialEnd, currentPeriodEnd: trialEnd },
@@ -505,6 +523,34 @@ export class SuperadminService {
 
 
   /** Karti elle yak / stoga geri al */
+  // Karti tamamen sifirla: sahibi kaldir, stoga al, yeni gizli kod uret
+  async releaseVehicle(code: string) {
+    const v = await this.prisma.vehicle.findUnique({ where: { code } });
+    if (!v) return { success: false, message: 'Kart bulunamadi' };
+    await this.prisma.vehicleUser.deleteMany({ where: { vehicleId: v.id } });
+    // Aktivasyon kodunu serbest birak (kutudaki kagit tekrar kullanilabilsin)
+    await this.prisma.activationCode.updateMany({
+      where: { usedVehicleId: v.id },
+      data: { used: false, usedVehicleId: null, usedUserId: null, usedAt: null },
+    });
+    await this.prisma.subscription.updateMany({
+      where: { vehicleId: v.id },
+      data: { status: 'cancelled', cancelledAt: new Date() },
+    });
+    await this.prisma.vehicle.update({
+      where: { id: v.id },
+      data: {
+        ownerUserId: null,
+        status: 'unsold',
+        label: null,
+        plate: null,
+        activeMessage: null,
+        secretCodeHash: null,
+      },
+    });
+    return { success: true, code };
+  }
+
   async setVehicleStatus(code: string, status: string) {
     if (!['burned', 'unsold'].includes(status)) {
       return { success: false, message: 'Gecersiz durum' };

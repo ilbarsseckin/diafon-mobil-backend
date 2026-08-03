@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+
+const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 7);
+
 // Fiyatlandirma: daire basina hacim indirimli (TL/ay)
 function pricePerFlat(count: number): number {
   if (count <= 20) return 15;
@@ -61,9 +64,9 @@ export class SubscriptionService {
         orderBy: { createdAt: 'desc' },
       });
 
-      // Yoksa 14 gunluk deneme baslat (her lokasyon kendi denemesini alir)
+      // Yoksa deneme baslat (TRIAL_DAYS gun, her lokasyon kendi denemesini alir) (her lokasyon kendi denemesini alir)
       if (!sub) {
-        const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+        const trialEnd = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
         sub = await this.prisma.subscription.create({
           data: {
             ownerUserId: userId,

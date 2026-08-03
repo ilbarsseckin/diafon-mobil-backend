@@ -1,13 +1,14 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsInt, Min, Max, MaxLength, IsEmail } from 'class-validator';
 
 export class ActivateVehicleDto {
   @IsString()
   @IsNotEmpty({ message: 'code zorunlu' })
   code: string;
 
-  @IsString()
-  @IsNotEmpty({ message: 'secretCode zorunlu' })
-  secretCode: string;
+  @IsEmail({}, { message: 'Gecerli bir e-posta adresi girin' })
+  @IsNotEmpty({ message: 'email zorunlu' })
+  @MaxLength(120)
+  email: string;
 
   @IsOptional()
   @IsString()
@@ -23,6 +24,11 @@ export class ActivateVehicleDto {
 export class GenerateBatchDto {
   @IsInt()
   @Min(1)
-  @Max(500)
+  @Max(1000)
   count: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  batch?: string;
 }

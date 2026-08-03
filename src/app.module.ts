@@ -1,3 +1,4 @@
+import { CallModule } from './call/call.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -20,7 +21,7 @@ import { VehicleOrdersModule } from './vehicle-orders/vehicle-orders.module';
 import { AccountCleanupService } from './tasks/account-cleanup.service';
 
 @Module({
-  imports: [
+  imports: [CallModule, 
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,

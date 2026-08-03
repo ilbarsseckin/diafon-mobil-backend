@@ -18,6 +18,39 @@ export class DoorController {
     }
   }
 
+  // SHELLY SIHIRBAZI: cihaza ozel MQTT kimligi
+  @UseGuards(JwtAuthGuard)
+  @Post('provision-credentials')
+  async provisionCredentials(@Req() req: any, @Body() body: { buildingId: string }) {
+    try {
+      if (!body?.buildingId) return { success: false, message: 'buildingId gerekli' };
+      const creds = await this.doorService.provisionCredentials(req.user.userId, body.buildingId);
+      return { success: true, ...creds };
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  }
+
+  // Kapinin role cekme suresini degistir
+  @UseGuards(JwtAuthGuard)
+  @Post('set-pulse')
+  async setPulse(@Req() req: any, @Body() body: { doorId: string; seconds: number }) {
+    try {
+      if (!body?.doorId || !body?.seconds) return { success: false, message: 'doorId ve seconds gerekli' };
+      return await this.doorService.setDoorPulse(req.user.userId, body.doorId, body.seconds);
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  }
+
+  // SHELLY SIHIRBAZI: cihaz cevrimici mi
+  @UseGuards(JwtAuthGuard)
+  @Post('verify')
+  async verifyDevice(@Body() body: { deviceId: string }) {
+    if (!body?.deviceId?.trim()) return { ok: false, message: 'deviceId gerekli' };
+    return this.doorService.verifyDevice(body.deviceId.trim());
+  }
+
   // Belirli kapiyi ac
   @UseGuards(JwtAuthGuard)
   @Post('open')

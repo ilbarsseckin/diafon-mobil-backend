@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { DoorController } from './door.controller';
 import { DoorService } from './door.service';
+import { SubscriptionModule } from '../subscription/subscription.module';
 import { TuyaAdapter } from './adapters/tuya.adapter';
+import { ShellyMqttAdapter } from './adapters/shelly-mqtt.adapter';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SubscriptionModule],
   controllers: [DoorController],
-  providers: [DoorService, TuyaAdapter],
+  providers: [DoorService, TuyaAdapter, ShellyMqttAdapter],
   exports: [DoorService],
 })
 export class DoorModule {}

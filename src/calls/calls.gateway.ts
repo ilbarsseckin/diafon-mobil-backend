@@ -16,6 +16,10 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Misafir cagrilari: callId -> { callerSocketId, callerUserId, receiverUserId }
   private guestCalls = new Map<string, { callerSocketId: string; callerUserId: string; receiverUserId: string }>();
   // Daire (grup) cagrilari: callId -> { tum alicilar, cevaplandi mi }
+  private callTimers = new Map<string, NodeJS.Timeout[]>();
+  private callExtends = new Map<string, number>();
+  private readonly CALL_LIMIT_SEC = 45;
+  private readonly MAX_EXTENDS = 1;
   private flatCallTargets = new Map<string, { receiverIds: string[]; answered: boolean; buildingId: string | null; apartmentId: string; guestName: string | null; callerUserId: string | null }>();
 
   constructor(
@@ -334,6 +338,71 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }, 30000);
   }
 
+  // --- Gorusme suresi yonetimi (45 sn) ---
+  private async notifyCall(callId: string, event: string, payload: any) {
+    const g = this.guestCalls.get(callId);
+    const flat = this.flatCallTargets.get(callId);
+    if (g) this.server.to(g.callerSocketId).emit(event, payload);
+    if (flat) {
+      for (const uid of flat.receiverIds) {
+        const sid = await this.presence.getSocketId(uid!);
+        if (sid) this.server.to(sid).emit(event, payload);
+      }
+    } else if (g && g.receiverUserId) {
+      const rsid = await this.presence.getSocketId(g.receiverUserId);
+      if (rsid) this.server.to(rsid).emit(event, payload);
+    } else {
+      try {
+        const call = await this.prisma.call.findUnique({ where: { id: callId } });
+        if (call) {
+          for (const uid of [call.callerUserId, call.receiverUserId]) {
+            if (!uid) continue;
+            const sid = await this.presence.getSocketId(uid);
+            if (sid) this.server.to(sid).emit(event, payload);
+          }
+        }
+      } catch {}
+    }
+  }
+  private clearTimer(callId: string) {
+    const ts = this.callTimers.get(callId);
+    if (ts) ts.forEach(t => clearTimeout(t));
+    this.callTimers.delete(callId);
+    this.callExtends.delete(callId);
+  }
+  private startTimer(callId: string) {
+    this.clearTimer(callId);
+    const limit = this.CALL_LIMIT_SEC;
+    const warn = setTimeout(() => {
+      this.notifyCall(callId, 'call:warning', { callId, remaining: 10 }).catch(() => {});
+    }, (limit - 10) * 1000);
+    const kill = setTimeout(() => {
+      this.callTimers.delete(callId);
+      this.notifyCall(callId, 'call:timeout', { callId }).catch(() => {});
+      this.onCallEnd(null as any, { callId }).catch(() => {});
+    }, limit * 1000);
+    this.callTimers.set(callId, [warn, kill]);
+    this.notifyCall(callId, 'call:limit', { callId, seconds: limit }).catch(() => {});
+  }
+  @SubscribeMessage('call:extend')
+  async onCallExtend(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    if (!this.callTimers.has(data.callId)) return;
+    const used = this.callExtends.get(data.callId) || 0;
+    if (used >= this.MAX_EXTENDS) {
+      client.emit('call:extend-denied', { callId: data.callId });
+      return;
+    }
+    const timers = this.callTimers.get(data.callId);
+    if (timers) timers.forEach(t => clearTimeout(t));
+    this.callTimers.delete(data.callId);
+    this.startTimer(data.callId);
+    this.callExtends.set(data.callId, used + 1);
+    await this.notifyCall(data.callId, 'call:extended', {
+      callId: data.callId,
+      seconds: this.CALL_LIMIT_SEC,
+      remainingExtends: this.MAX_EXTENDS - (used + 1),
+    });
+  }
   @SubscribeMessage('call:accept')
   async onCallAccept(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
     // ARAC/GUEST accept fallback: dus UUID callId'li misafir cagrilari (arac) burada yakalanir.
@@ -345,6 +414,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const accepterId = client.data.userId;
         gAuto.receiverUserId = accepterId;
         this.server.to(gAuto.callerSocketId).emit('call:accepted', { callId: data.callId, accepterId });
+        this.startTimer(data.callId);
         try {
           await this.prisma.call.update({ where: { id: data.callId }, data: { status: 'ACCEPTED' } });
         } catch (e) { /* arac cagrisi olmayabilir, sorun degil */ }
@@ -380,6 +450,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Arayana: kabul edildi (WebRTC baslasin), kabul eden kisiyle
       if (g) {
         this.server.to(g.callerSocketId).emit('call:accepted', { callId: data.callId, accepterId });
+        this.startTimer(data.callId);
         // guestCalls'taki receiver'i guncelle (artik kabul eden kisi)
         g.receiverUserId = accepterId;
       }
@@ -397,6 +468,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const g = this.guestCalls.get(data.callId);
       if (g) {
         this.server.to(g.callerSocketId).emit('call:accepted', { callId: data.callId });
+        this.startTimer(data.callId);
       }
       return;
     }
@@ -407,6 +479,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const callerSocketId = await this.presence.getSocketId(call.callerUserId!);
     if (callerSocketId) {
       this.server.to(callerSocketId).emit('call:accepted', { callId: call.id });
+      this.startTimer(call.id);
     }
   }
 
@@ -431,6 +504,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('call:reject')
   async onCallReject(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    this.clearTimer(data.callId);
     // ARAC/GUEST reject fallback: dus UUID callId'li misafir (arac) cagrilarini yakala.
     {
       const gAuto = this.guestCalls.get(data.callId);
@@ -483,6 +557,7 @@ export class CallsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- Cagri bitir ---
   @SubscribeMessage('call:end')
   async onCallEnd(@ConnectedSocket() client: Socket, @MessageBody() data: { callId: string }) {
+    this.clearTimer(data.callId);
     // Daire (grup) cagrisi - flatcall: iki tarafa da bitti bildir
     if (data.callId.startsWith('flatcall_')) {
       const g = this.guestCalls.get(data.callId);

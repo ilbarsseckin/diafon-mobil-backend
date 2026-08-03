@@ -97,7 +97,7 @@
     <video id="remoteVideo" autoplay playsinline></video>
     <video id="localVideo" autoplay playsinline muted></video>
     <div class="call-info">
-      <div class="peer-name" id="peerName">Sakin</div>
+      <div class="peer-name" id="peerName">Araç Sahibi</div>
       <div class="status" id="callStatus">Aranıyor...</div>
     </div>
     <div class="call-controls">
@@ -193,8 +193,8 @@
             '<div class="arac-name">' + aracAdi + '</div>' +
             '<div class="arac-online">' + onlineDot + '</div>' +
             mesajHtml +
-            '<button class="arac-call-btn" onclick="callUser(\'' + o.userId + '\',\'' + aracAdi + '\')">📞 Ara</button>' +
-            '<button class="arac-ring-btn" onclick="ringVehicle()">🔔 Zil Çal (Sahibe Haber Ver)</button>' +
+            '<button class="arac-call-btn" onclick="callUser(\'' + o.userId + '\',\'' + aracAdi + '\')">📞 Araç Sahibini Ara</button>' +
+            '<button class="arac-ring-btn" onclick="ringVehicle()">🔔 Haber Ver</button>' +
             '<div class="arac-kvkk">🔒 Güvenlik amacıyla aramanız konumunuzla birlikte kaydedilir.</div>' +
           '</div>';
       } catch (e) {
@@ -414,7 +414,7 @@
         const startUser = async () => {
           document.getElementById('callStatus').textContent = name + ' aranıyor...';
           let pos = null;
-          try { pos = await getPos(); } catch (e) {}
+          pos = null; // arac akisinda konum kullanilmiyor
           socket.emit('call:start', {
             receiverUserId: userId,
             callerLat: pos ? pos.lat : undefined,
@@ -456,7 +456,7 @@
       currentPeerId = null;
       try {
         if (!await setupCall(name)) return;
-        const pos = await getPos();
+        const pos = null; // arac akisinda konum kullanilmiyor
         const startFlat = () => {
           document.getElementById('callStatus').textContent = name + ' çalınıyor...';
           const payload = { apartmentId, source: 'qr' };

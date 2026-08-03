@@ -4,10 +4,11 @@ import { CallsService } from './calls.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PushService } from './push.service';
 import { CallsGateway } from './calls.gateway';
+import { SubscriptionGateService } from '../subscription/subscription-gate.service';
 
 @Controller('calls')
 export class CallsController {
-  constructor(private callsService: CallsService, private prisma: PrismaService, private push: PushService, private gateway: CallsGateway) {}
+  constructor(private callsService: CallsService, private prisma: PrismaService, private push: PushService, private gateway: CallsGateway, private gate: SubscriptionGateService) {}
 
   // Cagri gecmisim
   @UseGuards(JwtAuthGuard)
@@ -45,6 +46,10 @@ export class CallsController {
       include: { building: true },
     });
     if (!apt) return { success: false, message: 'Daire bulunamadi' };
+    const gate = await this.gate.canServeBuilding(apt.buildingId);
+    if (!gate.ok) {
+      return { success: false, code: 'SUBSCRIPTION_EXPIRED', message: gate.message };
+    }
     const residents = await this.prisma.resident.findMany({
       where: { apartmentId: body.apartmentId, visible: true, approved: true, user: { blocked: false } },
       include: { user: true },

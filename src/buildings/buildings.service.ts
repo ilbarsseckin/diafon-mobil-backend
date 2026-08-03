@@ -701,7 +701,40 @@ export class BuildingsService {
       createdBuildings.push({ id: building.id, buildingName, blockName: block.blockName, flatCount: count, qrToken: token });
     }
 
-    return { success: true, buildings: createdBuildings };
+    // Sahibi kendi dairesine sakin olarak ekle (bu binada oturuyorsa)
+    if (dto.ownerFlatNo && dto.ownerFlatNo.trim()) {
+      const flatNo = dto.ownerFlatNo.trim();
+      const wantBlock = (dto.ownerBlockName || '').trim();
+      // Blok adi verilmisse eslesen binayi, yoksa ilk binayi kullan
+      let target = createdBuildings[0];
+      if (wantBlock) {
+        const found = createdBuildings.find(
+          (b) => (b.blockName || '').trim() === wantBlock,
+        );
+        if (found) target = found;
+      }
+      if (target) {
+        const apt = await this.prisma.apartment.findFirst({
+          where: { buildingId: target.id, flatNo },
+        });
+        if (apt) {
+          try {
+            await this.prisma.resident.create({
+              data: {
+                userId,
+                apartmentId: apt.id,
+                visible: true,
+                approved: true,
+              },
+            });
+          } catch (_) {
+            // zaten sakin (unique cakismasi) - sorun degil
+          }
+        }
+      }
+    }
+
+    return { success: true, buildings: createdBuildings, locationId: siteLokasyon.id };
   }
 
   // Isyeri (ticari birim) olustur - tek bina, tek birim, type=business

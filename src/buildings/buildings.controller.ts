@@ -7,10 +7,12 @@ import { CreateBuildingDto } from './dto/building.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/guards/roles.decorator';
+import { TuyaAdapter } from '../door/adapters/tuya.adapter';
+import { DoorService } from '../door/door.service';
 
 @Controller('buildings')
 export class BuildingsController {
-  constructor(private service: BuildingsService, private prisma: PrismaService, private push: PushService, private sms: SmsService) {}
+  constructor(private service: BuildingsService, private prisma: PrismaService, private push: PushService, private sms: SmsService, private tuya: TuyaAdapter, private doorService: DoorService) {}
 
   // --- Herkese acik: konuma gore bina + sakin listesi ---
   @Get('nearby')
@@ -647,11 +649,29 @@ export class BuildingsController {
   // --- YONETICI: kapi ekle ---
   @UseGuards(JwtAuthGuard)
   @Post('add-door')
-  async addDoor(@Req() req: any, @Body() body: { buildingId: string; name: string; deviceId: string; adapter?: string }) {
+  async addDoor(@Req() req: any, @Body() body: { buildingId: string; name: string; deviceId: string; adapter?: string; mqttUser?: string }) {
     const building = await this.prisma.building.findUnique({ where: { id: body.buildingId } });
     if (!building) return { success: false, message: 'Bina bulunamadi' };
     if (building.ownerUserId !== req.user.userId) return { success: false, message: 'Yetki yok' };
     if (!body.name?.trim() || !body.deviceId?.trim()) return { success: false, message: 'Isim ve cihaz ID gerekli' };
+    const adapterName = body.adapter?.trim() || 'tuya';
+    if (adapterName === 'tuya') {
+      const v = await this.tuya.verify(body.deviceId.trim());
+      if (!v.ok) {
+        return { success: false, message: 'Cihaza erisilemiyor: ' + (v.message || 'bilinmeyen') + '. Cihazin hesabiniza eslestirildiginden emin olun.' };
+      }
+      if (v.online === false) {
+        return { success: false, message: 'Cihaz bulundu ama cevrimdisi. Role elektrik/WiFi baglantisini kontrol edin.' };
+      }
+    }
+    // Ayni binada ayni cihaz zaten kayitli mi? (sihirbaz iki kez calisirsa)
+    const mevcut = await this.prisma.door.findFirst({
+      where: { buildingId: body.buildingId, deviceId: body.deviceId.trim() },
+    });
+    if (mevcut) {
+      if (body.mqttUser) await this.doorService.writeAcl(body.mqttUser, body.deviceId.trim());
+      return { success: true, door: mevcut, message: 'Bu cihaz zaten kayitli, guncellendi' };
+    }
     const count = await this.prisma.door.count({ where: { buildingId: body.buildingId } });
     const door = await this.prisma.door.create({
       data: {
@@ -662,6 +682,10 @@ export class BuildingsController {
         sortOrder: count,
       },
     });
+    // Cihazi kendi MQTT topic'ine kilitle (guvenlik)
+    if (body.mqttUser) {
+      await this.doorService.writeAcl(body.mqttUser, body.deviceId.trim());
+    }
     return { success: true, door };
   }
 

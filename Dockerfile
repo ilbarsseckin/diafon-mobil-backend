@@ -7,6 +7,7 @@ RUN npx prisma generate
 RUN npm run build
 
 FROM node:20-alpine
+RUN apk add --no-cache mosquitto
 RUN apk add --no-cache ttf-dejavu
 WORKDIR /app
 COPY package*.json ./

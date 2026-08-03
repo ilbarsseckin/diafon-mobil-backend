@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Headers, Res, UnauthorizedException, Param } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Body, Headers, Res, UnauthorizedException, Param, Query } from '@nestjs/common';
 import type { Response } from 'express';
 import { SuperadminService } from './superadmin.service';
 import { PushService } from '../calls/push.service';
@@ -66,6 +66,11 @@ export class SuperadminController {
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
     return this.service.owners();
   }
+  @Post('vehicles/release')
+  release(@Body() body: { code: string }) {
+    return this.service.releaseVehicle(body.code);
+  }
+
   @Post('vehicles/set-status')
   async setVehicleStatus(@Headers('authorization') auth: string, @Body() body: { code: string; status: string }) {
     const token = (auth || '').replace('Bearer ', '');
@@ -82,6 +87,17 @@ export class SuperadminController {
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `attachment; filename="${code}.png"`);
     res.send(png);
+  }
+  @Get('manual-pdf')
+  async manualPdf(@Headers('authorization') auth: string, @Query('count') count: string, @Res() res: Response) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) { res.status(401).json({ message: 'Yetkisiz' }); return; }
+    const adet = Math.min(Math.max(parseInt(count || '12', 10) || 12, 1), 1200);
+    const pdf = await this.labelService.generateManual(adet);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="kurulum-kilavuzu.pdf"');
+    res.send(pdf);
   }
   @Get('locations')
   async locations(@Headers('authorization') auth: string) {
@@ -169,7 +185,7 @@ export class SuperadminController {
     const token = (auth || '').replace('Bearer ', '');
     const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
     if (token !== expected) throw new UnauthorizedException('Yetkisiz');
-    return this.vehiclesService.resetSecretCode(body.code);
+    return this.vehiclesService.issueActivationCode();
   }
 
   // Etiket PDF uret (superadmin). Uretim aninda elde edilen code+secretCode listesinden.
@@ -237,6 +253,50 @@ export class SuperadminController {
   async sendInvoice(@Headers('authorization') a: string, @Body() body: { id: string }) {
     this.auth(a);
     return this.service.sendInvoiceMail(body.id);
+  }
+
+
+  // Matbaa PDF'i: iki havuz AYRI dosya olarak basilir.
+  // format=stickers -> sadece QR etiketleri (codes listesi)
+  // format=secrets  -> sadece aktivasyon kartlari (secrets listesi)
+  @Post('vehicles/print')
+  async print(
+    @Headers('authorization') auth: string,
+    @Body() body: { format: string; codes?: string[]; secrets?: string[] },
+    @Res() res: Response,
+  ) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) { res.status(401).json({ message: 'Yetkisiz' }); return; }
+
+    let pdf: Buffer;
+    let dosya: string;
+
+    if (body.format === 'secrets') {
+      const list = body.secrets || [];
+      if (list.length === 0) { res.status(400).json({ message: 'Kod listesi bos' }); return; }
+      pdf = await this.labelService.generateSecretCards(list);
+      dosya = 'aktivasyon-kartlari.pdf';
+    } else {
+      const list = body.codes || [];
+      if (list.length === 0) { res.status(400).json({ message: 'QR listesi bos' }); return; }
+      pdf = await this.labelService.generateStickerSheet(list);
+      dosya = 'qr-etiketleri.pdf';
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + dosya + '"');
+    res.send(pdf);
+  }
+
+
+  // Aktivasyon kodu havuzu durumu (superadmin)
+  @Get('vehicles/pool')
+  async pool(@Headers('authorization') auth: string) {
+    const token = (auth || '').replace('Bearer ', '');
+    const expected = 'super_' + Buffer.from(process.env.SUPERADMIN_PASS || 'superadmin2026').toString('base64');
+    if (token !== expected) throw new UnauthorizedException('Yetkisiz');
+    return this.vehiclesService.activationPoolStatus();
   }
 
 }

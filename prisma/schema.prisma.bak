@@ -12,6 +12,7 @@ model User {
   name          String
   phone         String     @unique
   email         String?
+  emailVerified Boolean    @default(false) @map("email_verified")
   role          UserRole   @default(GUEST)
   photoUrl      String?    @map("photo_url")
   phoneVerified Boolean    @default(false) @map("phone_verified")
@@ -25,9 +26,27 @@ model User {
   callerCalls   Call[]     @relation("CallerUser")
   receiverCalls Call[]     @relation("ReceiverUser")
   residents     Resident[]
+  vehicleLinks  VehicleUser[]
+  activationCodes ActivationCode[]
   @@map("users")
 }
 
+model Location {
+  id               String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  name             String
+  type             String    @default("residential")
+  businessCategory String?   @map("business_category")
+  ownerUserId      String?   @map("owner_user_id")
+  address          String?
+  latitude         Float
+  longitude        Float
+  createdAt        DateTime  @default(now()) @map("created_at")
+  buildings        Building[]
+  subscriptions    Subscription[]
+  @@index([ownerUserId], map: "idx_locations_owner")
+  @@index([type], map: "idx_locations_type")
+  @@map("locations")
+}
 model Building {
   id                   String      @id @default(uuid())
   buildingName         String      @map("building_name")
@@ -50,6 +69,8 @@ model Building {
   type                 String      @default("residential")
   businessCategory     String?     @map("business_category")
   securityMode         String      @default("qr") @map("security_mode")
+  locationId           String?     @map("location_id")
+  location             Location?   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   apartments           Apartment[]
   calls                Call[]
   @@map("buildings")
@@ -95,6 +116,9 @@ model Call {
   callerPhotoUrl String?    @map("caller_photo_url")
   guestName      String?    @map("guest_name")
   apartmentId    String?    @map("apartment_id")
+  callerLat      Float?     @map("caller_lat")
+  callerLng      Float?     @map("caller_lng")
+  vehicleId      String?    @map("vehicle_id")
   building       Building?  @relation(fields: [buildingId], references: [id])
   callerUser     User?      @relation("CallerUser", fields: [callerUserId], references: [id], onDelete: Restrict)
   receiverUser   User       @relation("ReceiverUser", fields: [receiverUserId], references: [id])
@@ -163,14 +187,11 @@ model Subscription {
   trialEndsAt     DateTime? @map("trial_ends_at")
   currentPeriodEnd DateTime? @map("current_period_end")
   vehicleId        String?   @map("vehicle_id")
-  vehicleId        String?   @map("vehicle_id")
-  vehicleId        String?   @map("vehicle_id")
-  vehicleId        String?   @map("vehicle_id")
   createdAt       DateTime  @default(now()) @map("created_at")
+  cancelledAt     DateTime? @map("cancelled_at")
+  locationId      String?   @map("location_id")
+  location        Location? @relation(fields: [locationId], references: [id], onDelete: Cascade)
   @@index([ownerUserId], map: "idx_subs_owner")
-  @@index([vehicleId], map: "idx_subs_vehicle")
-  @@index([vehicleId], map: "idx_subs_vehicle")
-  @@index([vehicleId], map: "idx_subs_vehicle")
   @@index([vehicleId], map: "idx_subs_vehicle")
   @@map("subscriptions")
 }
@@ -211,6 +232,22 @@ model SiteText {
   @@map("site_texts")
 }
 
+model Invoice {
+  id             String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  ownerUserId    String    @map("owner_user_id")
+  title          String?
+  amount         Int?
+  paymentStatus String    @default("pending") @map("payment_status")
+  fileUrl        String?   @map("file_url")        // yuklenen PDF yolu
+  uploadedAt     DateTime? @map("uploaded_at")     // PDF yuklendi mi
+  sentAt         DateTime? @map("sent_at")         // mail gitti mi (null = gonderilmedi)
+  buildingId     String?   @map("building_id")     // opsiyonel: hangi bina/isletme
+  vehicleId      String?   @map("vehicle_id")      // opsiyonel: hangi arac QR
+  note           String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  @@index([ownerUserId], map: "idx_invoices_owner")
+  @@map("invoices")
+}
 
 enum CallStatus {
   RINGING
@@ -228,56 +265,77 @@ enum UserRole {
 
 model Vehicle {
   id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  ownerUserId    String   @map("owner_user_id")
+  ownerUserId    String?  @map("owner_user_id")
   label          String?
   plate          String?
   code           String   @unique
-  secretCodeHash String   @map("secret_code_hash")
-  status         String   @default("active")
+  secretCodeHash String?  @map("secret_code_hash")
+  status         String   @default("unsold")
+  activeMessage  String?  @map("active_message")
   createdAt      DateTime @default(now()) @map("created_at")
-
+  secondaryUsers VehicleUser[]
+  activationCodes ActivationCode[]
   @@index([ownerUserId], map: "idx_vehicles_owner")
   @@map("vehicles")
 }
 
-model Vehicle {
-  id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  ownerUserId    String   @map("owner_user_id")
-  label          String?
-  plate          String?
-  code           String   @unique
-  secretCodeHash String   @map("secret_code_hash")
-  status         String   @default("active")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  @@index([ownerUserId], map: "idx_vehicles_owner")
-  @@map("vehicles")
+model VehicleUser {
+  id        String   @id @default(uuid())
+  vehicleId String   @map("vehicle_id")
+  userId    String   @map("user_id")
+  role      String   @default("secondary")
+  createdAt DateTime @default(now()) @map("created_at")
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([vehicleId, userId])
+  @@map("vehicle_users")
 }
 
-model Vehicle {
-  id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  ownerUserId    String   @map("owner_user_id")
-  label          String?
-  plate          String?
-  code           String   @unique
-  secretCodeHash String   @map("secret_code_hash")
-  status         String   @default("active")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  @@index([ownerUserId], map: "idx_vehicles_owner")
-  @@map("vehicles")
+model VehicleOrder {
+  id                String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  buyerName         String    @map("buyer_name")
+  buyerPhone        String    @map("buyer_phone")
+  buyerEmail        String?   @map("buyer_email")
+  shipCity          String    @map("ship_city")
+  shipDistrict      String?   @map("ship_district")
+  shipAddress       String    @map("ship_address")
+  amount            Int
+  status            String    @default("pending")
+  shipStatus        String    @default("preparing") @map("ship_status")
+  trackingNo        String?   @map("tracking_no")
+  conversationId    String?   @map("conversation_id")
+  iyzicoPaymentId   String?   @map("iyzico_payment_id")
+  vehicleCode       String?   @map("vehicle_code")
+  vehicleSecretCode String?   @map("vehicle_secret_code")
+  buyerUserId       String?   @map("buyer_user_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  paidAt            DateTime? @map("paid_at")
+  shippedAt         DateTime? @map("shipped_at")
+  quantity           Int       @default(1)
+  unitPrice          Int?      @map("unit_price")
+  shippingFee        Int       @default(0) @map("shipping_fee")
+  tagAmount          Int?      @map("tag_amount")
+  subscriptionAmount Int?      @map("subscription_amount")
+  refundedAt         DateTime? @map("refunded_at")
+  refundAmount       Int?      @map("refund_amount")
+  refundReason       String?   @map("refund_reason")
+  cancelledAt        DateTime? @map("cancelled_at")
+  @@index([status], map: "idx_vorders_status")
+  @@map("vehicle_orders")
 }
 
-model Vehicle {
-  id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  ownerUserId    String   @map("owner_user_id")
-  label          String?
-  plate          String?
-  code           String   @unique
-  secretCodeHash String   @map("secret_code_hash")
-  status         String   @default("active")
-  createdAt      DateTime @default(now()) @map("created_at")
+model ActivationCode {
+  id            String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  codeHash      String    @unique @map("code_hash")
+  batch         String?
+  used          Boolean   @default(false)
+  usedVehicleId String?   @map("used_vehicle_id")
+  usedUserId    String?   @map("used_user_id")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
 
-  @@index([ownerUserId], map: "idx_vehicles_owner")
-  @@map("vehicles")
+  usedVehicle   Vehicle?  @relation(fields: [usedVehicleId], references: [id])
+  usedUser      User?     @relation(fields: [usedUserId], references: [id])
+
+  @@map("activation_codes")
 }

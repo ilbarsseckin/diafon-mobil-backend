@@ -54,6 +54,26 @@ export class TuyaAdapter implements DoorAdapter {
     this.tokenExpire = Date.now() + (data.result.expire_time - 60) * 1000;
   }
 
+  // Cihaz projede var mi / erisilebilir mi? Kayittan once dogrulama icin.
+  async verify(deviceId: string): Promise<{ ok: boolean; name?: string; online?: boolean; message?: string }> {
+    if (!this.accessId || !this.accessSecret) {
+      return { ok: false, message: 'Tuya yapilandirilmamis' };
+    }
+    try {
+      await this.ensureToken();
+      const path = `/v1.0/devices/${deviceId}`;
+      const headers = this.buildHeaders('GET', path, '', true);
+      const res = await fetch(this.baseUrl + path, { method: 'GET', headers });
+      const data: any = await res.json();
+      if (!data.success) {
+        this.logger.warn('Tuya dogrulama basarisiz: ' + JSON.stringify(data));
+        return { ok: false, message: data.msg || 'Cihaza erisilemiyor' };
+      }
+      return { ok: true, name: data.result?.name, online: data.result?.online };
+    } catch (e: any) {
+      return { ok: false, message: e?.message || 'Tuya baglanti hatasi' };
+    }
+  }
   async open(deviceId: string): Promise<void> {
     if (!this.accessId || !this.accessSecret) {
       throw new Error('Tuya yapilandirilmamis (TUYA_ACCESS_ID/SECRET eksik)');

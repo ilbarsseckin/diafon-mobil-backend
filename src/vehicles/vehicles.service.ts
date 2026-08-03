@@ -137,10 +137,23 @@ export class VehiclesService {
       canJoin: false,
       vehicle: { id: vehicle.id, label: vehicle.label },
       activeMessage: vehicle.activeMessage || null,
-      owner: owner ? { userId: owner.id, name: owner.name, photoUrl: owner.photoUrl, isOnline: owner.isOnline } : null,
+      owner: owner ? { userId: owner.id, isOnline: owner.isOnline } : null,
     };
   }
 
+  // Sahip aracinin etiket/plaka bilgisini gunceller
+  async setVehicleInfo(userId: string, vehicleId: string, label: string | null, plate: string | null) {
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+    if (!vehicle) throw new NotFoundException('Arac bulunamadi');
+    if (vehicle.ownerUserId !== userId) throw new BadRequestException('Bu araci duzenleme yetkiniz yok');
+    const l = (label || '').trim().slice(0, 40);
+    const pl = (plate || '').trim().toUpperCase().replace(/\s+/g, ' ').slice(0, 20);
+    const updated = await this.prisma.vehicle.update({
+      where: { id: vehicleId },
+      data: { label: l || null, plate: pl || null },
+    });
+    return { success: true, vehicle: { id: updated.id, label: updated.label, plate: updated.plate } };
+  }
   // Sahip aracinin aktif mesajini ayarlar/kaldirir
   async setMessage(userId: string, vehicleId: string, message: string | null) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
@@ -205,7 +218,6 @@ export class VehiclesService {
   async activate(
     userId: string,
     code: string,
-    secretCode: string,
     email?: string,
     label?: string,
     plate?: string,
@@ -219,30 +231,11 @@ export class VehiclesService {
       throw new BadRequestException('Bu kart zaten aktive edilmis');
     }
 
-    const codeHash = hashActivation(secretCode);
-    const act = await this.prisma.activationCode.findUnique({ where: { codeHash } });
-    if (!act) throw new BadRequestException('Gizli kod hatali');
-    if (act.used) throw new BadRequestException('Bu kod daha once kullanilmis');
-
     const cleanEmail = email?.trim().toLowerCase() || null;
 
     return this.prisma.$transaction(async (tx) => {
-      // Kodu KOSULLU sahiplen. Iki istek ayni anda gelirse sadece biri
-      // count=1 alir, digeri 0 -> yaris durumu veritabaninda cozulur.
-      const claimed = await tx.activationCode.updateMany({
-        where: { codeHash, used: false },
-        data: {
-          used: true,
-          usedVehicleId: vehicle.id,
-          usedUserId: userId,
-          usedAt: new Date(),
-        },
-      });
-      if (claimed.count === 0) {
-        throw new BadRequestException('Bu kod daha once kullanilmis');
-      }
-
-      // Araci da KOSULLU sahiplen
+      // FIRST-SCAN: araci KOSULLU sahiplen. Iki istek ayni anda gelirse
+      // sadece biri count=1 alir, digeri 0 -> ilk gelen kazanir.
       const vClaimed = await tx.vehicle.updateMany({
         where: { id: vehicle.id, ownerUserId: null },
         data: {
@@ -271,9 +264,13 @@ export class VehiclesService {
 
       const scopeName = updated.label || updated.plate || updated.code;
 
-      // Idempotent: bu arac icin auto aboneligi zaten var mi?
+      // Sadece AKTIF abonelik aranir. Kart sifirlanip yeniden aktive edilirse
+      // eski iptal kayit bulunmamali, 1 yil sifirdan baslamali.
       let sub: any = await tx.subscription.findFirst({
-        where: { ownerUserId: userId, scopeType: 'auto', vehicleId: updated.id },
+        where: {
+          ownerUserId: userId, scopeType: 'auto', vehicleId: updated.id,
+          status: 'active',
+        },
         orderBy: { createdAt: 'desc' },
       });
       if (!sub) {
@@ -286,7 +283,7 @@ export class VehiclesService {
             vehicleId: updated.id,
             status: 'active',
             flatCount: 0,
-            monthlyPrice: 0, // kart alinirken 1 yillik pesin odendi
+            monthlyPrice: 0,
             currentPeriodEnd: periodEnd,
           },
         });
@@ -305,6 +302,7 @@ export class VehiclesService {
       };
     });
   }
+
 
   async setVehicleActive(userId: string, id: string, active: boolean) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
@@ -348,7 +346,7 @@ export class VehiclesService {
     const vehicles = await this.prisma.vehicle.findMany({ orderBy: { createdAt: 'desc' } });
     const ownerIds = [...new Set(vehicles.map(v => v.ownerUserId).filter(Boolean))] as string[];
     const owners = ownerIds.length
-      ? await this.prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, phone: true } })
+      ? await this.prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true, phone: true, email: true } })
       : [];
     const subs = await this.prisma.subscription.findMany({ where: { scopeType: 'auto' } });
     const ownerMap = new Map(owners.map(o => [o.id, o]));
@@ -369,6 +367,7 @@ export class VehiclesService {
         status: v.status,
         ownerName: owner?.name || null,
         ownerPhone: owner?.phone || null,
+        ownerEmail: (owner as any)?.email || null,
         createdAt: v.createdAt,
         subscriptionEnd: sub?.currentPeriodEnd || null,
         subscriptionStatus: sub?.status || null,
