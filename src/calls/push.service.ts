@@ -102,7 +102,7 @@ export class PushService {
     return { sent };
   }
   // Zil bildirimi - gorunur + ses (ziyaretci daireye zil caldi)
-  async sendDoorbell(receiverUserIds: string[], visitorName: string, buildingName: string, sound?: string) {
+  async sendDoorbell(receiverUserIds: string[], visitorName: string, buildingName: string, sound?: string, cameraStreamId?: string) {
     if (!this.initialized) return;
     const users = await this.prisma.user.findMany({
       where: { id: { in: receiverUserIds }, fcmToken: { not: null } },
@@ -114,7 +114,7 @@ export class PushService {
       try {
         const msgId = await admin.messaging().send({
           token: u.fcmToken,
-          data: { type: 'doorbell', visitorName, buildingName },
+          data: { type: 'doorbell', visitorName, buildingName, ...(cameraStreamId ? { cameraStreamId } : {}) },
           android: { priority: 'high' },
         });
         this.logger.log('Zil FCM mesaj ID: ' + msgId);

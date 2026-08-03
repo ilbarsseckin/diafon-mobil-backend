@@ -58,7 +58,11 @@ export class CallsController {
     const receiverIds = residents.map((r) => r.user.id);
     const visitorName = (body.visitorName && body.visitorName.trim()) ? body.visitorName.trim() : 'Ziyaretci';
     const buildingName = apt.building?.buildingName || 'Bina';
-    await this.push.sendDoorbell(receiverIds, visitorName, buildingName, body.sound);
+    // Bina kamerasi aktifse, stream bilgisini de gonder (Yol 1 - cagriyla birlikte)
+    const camStreamId = (apt.building as any)?.cameraEnabled
+      ? (apt.building as any)?.cameraStreamId || undefined
+      : undefined;
+    await this.push.sendDoorbell(receiverIds, visitorName, buildingName, body.sound, camStreamId);
     return { success: true, message: 'Zil calindi', count: receiverIds.length };
   }
 }
