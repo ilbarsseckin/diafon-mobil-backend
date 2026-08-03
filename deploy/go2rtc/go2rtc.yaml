@@ -1,0 +1,22 @@
+# go2rtc yapilandirmasi
+# Kameralar buraya eklenecek (yarin kamera gelince)
+streams:
+  # Ornek (yarin doldurulacak):
+  # kapi1: rtsp://kullanici:sifre@192.168.1.45:554/Streaming/Channels/101
+
+api:
+  listen: "0.0.0.0:1984"
+
+rtsp:
+  listen: ":8554"
+
+webrtc:
+  listen: ":8555"            # WebRTC TCP/UDP
+  ice_servers:
+    - urls: ["stun:stun.l.google.com:19302"]
+    - urls: ["turn:128.140.127.151:3478"]
+      username: diafonturn
+      credential: turnpass2026
+
+log:
+  level: info

@@ -1,0 +1,116 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - /opt/mosquitto/config:/mosquitto/config
+      - /opt/mosquitto/data:/mosquitto/data
+      - /opt/mosquitto/log:/mosquitto/log
+
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: diafon-mobil-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: diafon_mobil
+      POSTGRES_USER: diafon_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - diafon_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diafon_user -d diafon_mobil"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: diafon-mobil-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - diafon_redis_data:/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: diafon-mobil-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://diafon_user:${DB_PASSWORD}@db:5432/diafon_mobil
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 4000
+      GO2RTC_API: http://172.22.0.1:1984
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/public:/app/public
+      - ./backend/uploads:/app/uploads
+      - /opt/mosquitto/config:/mosquitto-config
+    networks:
+      - default
+      - deploy_external
+
+  frontend:
+    build:
+      context: /opt/mobildiafon-frontend
+      dockerfile: Dockerfile
+    container_name: mobildiafon-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+    networks:
+      - default
+      - deploy_external
+  coturn:
+    image: coturn/coturn:latest
+    container_name: diafon-mobil-coturn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: diafon-mobil-go2rtc
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./go2rtc/go2rtc.yaml:/config/go2rtc.yaml
+  asterisk:
+    build: ./asterisk/build
+    container_name: diafon-mobil-asterisk
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./asterisk/conf/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./asterisk/conf/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/conf/http.conf:/etc/asterisk/http.conf:ro
+      - ./asterisk/conf/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - /opt/ard/deploy/certbot/conf:/etc/letsencrypt:ro
+
+volumes:
+  diafon_db_data:
+  diafon_redis_data:
+
+networks:
+  default:
+  deploy_external:
+    external: true
