@@ -1,10 +1,14 @@
 import { Controller, Post, Get, Param, Body, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { DoorService } from './door.service';
+import { CameraService } from './camera.service';
 
 @Controller('door')
 export class DoorController {
-  constructor(private doorService: DoorService) {}
+  constructor(
+    private doorService: DoorService,
+    private cameraService: CameraService,
+  ) {}
 
   // Binanin kapilarini listele
   @UseGuards(JwtAuthGuard)
@@ -61,6 +65,36 @@ export class DoorController {
       return { success: true, message: 'Kapi acildi' };
     } catch (e: any) {
       return { success: false, message: e.message || 'Kapi acilamadi' };
+    }
+  }
+  // KAMERA: binaya kamera tanimla/guncelle/kapat
+  @UseGuards(JwtAuthGuard)
+  @Post('set-camera')
+  async setCamera(
+    @Req() req: any,
+    @Body() body: { buildingId: string; rtspUrl?: string; enabled?: boolean },
+  ) {
+    try {
+      const res = await this.cameraService.setCamera(
+        req.user.userId,
+        body.buildingId,
+        body.rtspUrl ?? null,
+        body.enabled !== false && !!body.rtspUrl,
+      );
+      return res;
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Kamera ayarlanamadi' };
+    }
+  }
+
+  // KAMERA: binanin kamera stream bilgisini getir (mobil WebRTC icin)
+  @UseGuards(JwtAuthGuard)
+  @Get('camera/:buildingId')
+  async getCamera(@Param('buildingId') buildingId: string) {
+    try {
+      return await this.cameraService.getCamera(buildingId);
+    } catch (e: any) {
+      return { hasCamera: false };
     }
   }
 }
